@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      1.0.0
-// @description  Picks your best enlisted car for the current race track from global lap records and your own lap times. Highlights the Change Car button when a better car is available, and the best car on the car selection page.
+// @version      1.1.0
+// @description  Shows the best of your enlisted cars for the current race track, picked from global lap records and your own lap times.
 // @author       lannav
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "1.0.0";
+    const VERSION = "1.1.0";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -390,6 +390,11 @@
         return { rows, best, ratio, recordBest };
     }
 
+    function bestRowState(best, currentModelName) {
+        if (!best || !currentModelName) return "unknown";
+        return best.car.car_item_name === currentModelName.trim() ? "current" : "change";
+    }
+
     function sourceLabel(row) {
         switch (row.source) {
             case "record": return `global record (${row.record.driver})`;
@@ -400,7 +405,7 @@
     }
 
     if (typeof module !== "undefined" && module.exports) {
-        module.exports = { rankCars, isEligible, formatLap, median };
+        module.exports = { rankCars, isEligible, formatLap, median, bestRowState };
         return;
     }
 
@@ -587,20 +592,13 @@
     })();
 
     const PAGE_CSS = `
-@keyframes rcp-pulse{0%,100%{box-shadow:0 0 4px 1px rgba(46,204,113,.6)}50%{box-shadow:0 0 12px 4px rgba(46,204,113,1)}}
-@keyframes rcp-pulse-warn{0%,100%{box-shadow:0 0 4px 1px rgba(230,160,40,.6)}50%{box-shadow:0 0 12px 4px rgba(230,160,40,1)}}
-.rcp-hl{outline:2px solid #2ecc71!important;border-radius:4px;animation:rcp-pulse 1.4s ease-in-out infinite}
-.rcp-hl.rcp-warn{outline-color:#e6a028!important;animation-name:rcp-pulse-warn}
-.rcp-tag{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:600;
-    background:#1e4620;color:#8fe08f;vertical-align:middle;white-space:nowrap}
-.rcp-tag.rcp-warn{background:#3d2e10;color:#e6c27a}
-.rcp-tag.rcp-ok{background:#253025;color:#9cc89c;font-weight:400}
-.enlist-list>li.rcp-best{outline:2px solid #2ecc71;outline-offset:-2px;box-shadow:inset 0 0 16px rgba(46,204,113,.35)}
-.rcp-badge{margin:6px 0 2px;font-size:11px;color:#ccc;line-height:1.5}
-.rcp-badge .rcp-rank{display:inline-block;min-width:22px;padding:0 6px;margin-right:6px;border-radius:9px;background:#333;color:#fff;font-weight:700;text-align:center}
-.rcp-best .rcp-badge .rcp-rank{background:#2ecc71;color:#102010}
-.rcp-badge .rcp-dim{color:#888}
-.rcp-badge .rcp-no{color:#e08f8f}
+.rcp-row{clear:both;margin:8px 0;padding:8px 10px;border-radius:5px;font-size:12px;line-height:1.5;color:#ddd;
+    background:#2a2213;border:1px solid #5a4a1a}
+.rcp-row.rcp-current{background:#16301c;border-color:#2e6b3c}
+.rcp-row b{color:#fff}
+.rcp-row .rcp-dim{color:#999}
+.rcp-row .rcp-verdict{font-weight:600;color:#e6c27a}
+.rcp-row.rcp-current .rcp-verdict{color:#8fe08f}
 `;
 
     function injectPageCss() {
@@ -611,10 +609,27 @@
         document.head.appendChild(s);
     }
 
+    function carDisplayName(car) {
+        return car.car_name ? `${car.car_name} (${car.car_item_name})` : car.car_item_name;
+    }
+
+    function bestRowHtml(trackTitle, best, state) {
+        const lap = best.est != null
+            ? ` · est. lap <b>${formatLap(best.est)}</b> <span class="rcp-dim">(${escapeHtml(sourceLabel(best))})</span>`
+            : ` <span class="rcp-dim">(no lap data, picked by class)</span>`;
+        const verdict = state === "current" ? "✓ you use it"
+            : state === "change" ? "change to it"
+            : "";
+        return `Best car for ${escapeHtml(trackTitle)}: <b>${escapeHtml(carDisplayName(best.car))}</b>${lap}`
+            + (verdict ? ` — <span class="rcp-verdict">${verdict}</span>` : "");
+    }
+
     class RacingPage {
         constructor(data) {
             this.data = data;
             this._timer = null;
+            this._closedRaces = new Set();
+            this._busy = new WeakSet();
         }
 
         start() {
@@ -628,34 +643,71 @@
         }
 
         rescan() {
-            document.querySelectorAll("[data-rcp]").forEach((el) => el.removeAttribute("data-rcp"));
-            document.querySelectorAll(".rcp-badge,.rcp-tag").forEach((el) => el.remove());
-            document.querySelectorAll(".rcp-hl").forEach((el) => el.classList.remove("rcp-hl", "rcp-warn"));
-            document.querySelectorAll(".rcp-best").forEach((el) => el.classList.remove("rcp-best"));
+            document.querySelectorAll(".rcp-row").forEach((el) => el.remove());
             this.scan();
         }
 
         scan() {
             if (!this.data.api.key) return;
+            const carBox = document.querySelector(".car-selected .cont-black");
+            if (carBox && !carBox.querySelector(".rcp-row")) this._run(carBox, () => this.handleRacePage(carBox));
             const list = document.querySelector(".enlist-list");
-            if (list && !list.dataset.rcp && list.querySelector('a[step-value="changeRacingCar"]')) {
-                list.dataset.rcp = "1";
-                this.handleChangePage(list).catch((e) => console.warn("[RCP] change page:", e));
-            }
-            const btn = document.querySelector('.change-link a[href*="changeRacingCar"]');
-            if (btn && !btn.dataset.rcp) {
-                btn.dataset.rcp = "1";
-                this.handleChangeButton(btn).catch((e) => console.warn("[RCP] change button:", e));
+            const wrap = list?.closest(".enlist-wrap");
+            if (wrap && !wrap.querySelector(".rcp-row") && list.querySelector('a[step-value="changeRacingCar"]')) {
+                this._run(wrap, () => this.handleChangePage(wrap, list));
             }
         }
 
-        _currentRaceTitle() {
-            for (const title of document.querySelectorAll(".enlist-wrap .title-black")) {
-                if (title.textContent.trim().toLowerCase() !== "current race") continue;
-                const text = title.nextElementSibling?.querySelector(".enlisted-btn-wrap")?.textContent || "";
-                return text.split(" - ")[0].trim();
+        _run(host, fn) {
+            if (this._busy.has(host)) return;
+            this._busy.add(host);
+            fn().catch((e) => console.warn("[RCP]", e)).finally(() => this._busy.delete(host));
+        }
+
+        _showRow(anchor, position, html, state) {
+            const row = document.createElement("div");
+            row.className = "rcp-row" + (state === "current" ? " rcp-current" : "");
+            row.innerHTML = html;
+            anchor.insertAdjacentElement(position, row);
+        }
+
+        _raceIdFromPage() {
+            const fromUrl = new URLSearchParams(location.search).get("raceID");
+            if (fromUrl) return fromUrl;
+            const dataId = document.querySelector("#leaderBoard li[data-id]")?.getAttribute("data-id") || "";
+            const m = /^(\d+)-/.exec(dataId);
+            return m ? m[1] : null;
+        }
+
+        async handleRacePage(carBox) {
+            const raceId = this._raceIdFromPage();
+            if (raceId && this._closedRaces.has(raceId)) return;
+            const race = raceId
+                ? await this.data.race(raceId).catch(() => null)
+                : await this.data.activeRace().catch(() => null);
+            if (!race) return;
+            if (race.status !== "open") { this._closedRaces.add(String(race.id)); return; }
+
+            writeJson(LS.lastRace, {
+                raceId: race.id, trackId: race.track_id, requirements: race.requirements, ts: Date.now(),
+            });
+
+            const [{ best }, tracks] = await Promise.all([
+                this.data.rankForTrack(race.track_id, race.requirements),
+                this.data.tracks(),
+            ]);
+            if (!best || carBox.querySelector(".rcp-row")) return;
+            const trackTitle = tracks.find((t) => t.id === race.track_id)?.title || "this track";
+            const currentModel = carBox.querySelector(".model-wrap .img[title]")?.getAttribute("title");
+            const state = bestRowState(best, currentModel);
+            this._showRow(carBox, "beforeend", bestRowHtml(trackTitle, best, state), state);
+        }
+
+        _currentRaceBlock(wrap) {
+            for (const title of wrap.querySelectorAll(".title-black")) {
+                if (title.textContent.trim().toLowerCase() === "current race") return title.nextElementSibling;
             }
-            return "";
+            return null;
         }
 
         async _requirementsFor(trackId) {
@@ -666,103 +718,20 @@
             return null;
         }
 
-        async handleChangePage(list) {
-            const items = [...list.querySelectorAll(":scope > li")];
-            const byCarId = new Map();
-            for (const li of items) {
-                const link = li.querySelector('a[step-value="changeRacingCar"]');
-                if (link) byCarId.set(Number(link.getAttribute("id-value")), { li, link });
-            }
-
-            const track = await this.data.trackByTitle(this._currentRaceTitle());
+        async handleChangePage(wrap, list) {
+            const block = this._currentRaceBlock(wrap);
+            const title = (block?.querySelector(".enlisted-btn-wrap")?.textContent || "").split(" - ")[0];
+            const track = await this.data.trackByTitle(title);
             if (!track) return;
 
-            for (const [carId, { li, link }] of byCarId) {
-                if (li.querySelector(".icon-in-race")) {
-                    writeJson(LS.currentCar, { carId, trackId: track.id, ts: Date.now() });
-                }
-                link.addEventListener("click", () => {
-                    writeJson(LS.currentCar, { carId, trackId: track.id, ts: Date.now() });
-                }, { capture: true });
-            }
-
             const requirements = await this._requirementsFor(track.id);
-            const { rows, best } = await this.data.rankForTrack(track.id, requirements);
+            const { best } = await this.data.rankForTrack(track.id, requirements);
+            if (!best || wrap.querySelector(".rcp-row")) return;
 
-            rows.forEach((row, i) => {
-                const entry = byCarId.get(row.car.id);
-                if (!entry) return;
-                const { li } = entry;
-                li.querySelector(".rcp-badge")?.remove();
-                const isBest = best && best.car.id === row.car.id;
-                li.classList.toggle("rcp-best", !!isBest);
-                const badge = document.createElement("div");
-                badge.className = "rcp-badge";
-                const rank = row.eligible ? `#${i + 1}` : "—";
-                const lap = row.est != null
-                    ? `est. lap <b>${formatLap(row.est)}</b> <span class="rcp-dim">· ${escapeHtml(sourceLabel(row))}</span>`
-                    : `<span class="rcp-dim">no lap data for ${escapeHtml(track.title)}</span>`;
-                const own = row.ownLap != null ? ` <span class="rcp-dim">· your best ${formatLap(row.ownLap)}</span>` : "";
-                const blocked = row.eligible ? "" : ` <span class="rcp-no">· not allowed in this race</span>`;
-                const label = isBest ? ` <b style="color:#8fe08f">★ Best for ${escapeHtml(track.title)}</b>` : "";
-                badge.innerHTML = `<span class="rcp-rank">${rank}</span>${lap}${own}${blocked}${label}`;
-                const host = li.querySelector(".enlist-info") || li;
-                host.appendChild(badge);
-            });
-        }
-
-        _myCarInResults(race, cars) {
-            const ids = new Set(cars.map((c) => c.id));
-            const mine = (race.results || []).find((r) => ids.has(r.car_id));
-            return mine ? mine.car_id : null;
-        }
-
-        _storedCurrentCar(race) {
-            const stored = readJson(LS.currentCar);
-            if (!stored || stored.trackId !== race.track_id) return null;
-            const joinFrom = (race.schedule?.join_from || 0) * 1000;
-            return stored.ts >= joinFrom ? stored.carId : null;
-        }
-
-        async handleChangeButton(btn) {
-            const raceId = new URLSearchParams(location.search).get("raceID");
-            const race = raceId
-                ? await this.data.race(raceId).catch(() => null)
-                : await this.data.activeRace().catch(() => null);
-            if (!race || race.status !== "open") return;
-
-            writeJson(LS.lastRace, {
-                raceId: race.id, trackId: race.track_id, requirements: race.requirements, ts: Date.now(),
-            });
-
-            const [{ best }, cars, tracks] = await Promise.all([
-                this.data.rankForTrack(race.track_id, race.requirements),
-                this.data.cars(),
-                this.data.tracks(),
-            ]);
-            if (!best) return;
-            const trackTitle = tracks.find((t) => t.id === race.track_id)?.title || "this track";
-            const currentId = this._myCarInResults(race, cars) ?? this._storedCurrentCar(race);
-            const bestName = best.car.car_name || best.car.car_item_name;
-
-            btn.parentNode.querySelector(".rcp-tag")?.remove();
-            const tag = document.createElement("span");
-            tag.className = "rcp-tag";
-            if (currentId === best.car.id) {
-                tag.classList.add("rcp-ok");
-                tag.textContent = `✓ best car for ${trackTitle}`;
-            } else if (currentId == null) {
-                btn.classList.add("rcp-hl", "rcp-warn");
-                tag.classList.add("rcp-warn");
-                tag.textContent = `Best: ${bestName} — check your car`;
-            } else {
-                btn.classList.add("rcp-hl");
-                tag.textContent = `Better car: ${bestName}`;
-            }
-            tag.title = best.est != null
-                ? `${bestName}: est. lap ${formatLap(best.est)} (${sourceLabel(best)})`
-                : `${bestName}: no lap data, picked by class`;
-            btn.insertAdjacentElement("afterend", tag);
+            const currentLi = [...list.querySelectorAll(":scope > li")].find((li) => li.querySelector(".icon-in-race"));
+            const currentModel = currentLi?.querySelector(".model .bold")?.textContent.trim();
+            const state = bestRowState(best, currentModel);
+            this._showRow(block || list, block ? "afterend" : "beforebegin", bestRowHtml(track.title, best, state), state);
         }
     }
 
@@ -770,34 +739,21 @@
 #rcp-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2147483646;display:none}
 #rcp-overlay.rcp-open{display:flex;align-items:flex-start;justify-content:center;padding:40px 16px 16px}
 #rcp-panel{background:#1b1b1b;color:#ddd;border:1px solid #333;border-radius:8px;
-    width:min(860px,100%);max-height:calc(100vh - 56px);display:flex;flex-direction:column;
+    width:min(620px,100%);max-height:calc(100vh - 56px);display:flex;flex-direction:column;
     font:13px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,0.5)}
 #rcp-panel h2{margin:0;padding:12px 16px;border-bottom:1px solid #333;display:flex;align-items:center;gap:8px;font-size:15px;flex-wrap:wrap}
 #rcp-panel .rcp-close{margin-left:auto;background:none;border:0;color:#aaa;font-size:20px;cursor:pointer}
-#rcp-tabs{display:flex;border-bottom:1px solid #333;background:#141414}
-#rcp-tabs button{padding:10px 16px;background:none;border:0;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;font-size:13px}
-#rcp-tabs button.rcp-active{color:#fff;border-bottom-color:#2ecc71}
 #rcp-body{flex:1;overflow:auto;padding:12px 16px}
-#rcp-body table{width:100%;border-collapse:collapse;font-size:12px;color:#ddd}
-#rcp-body th,#rcp-body td{text-align:left;padding:6px 8px;border-bottom:1px solid #2a2a2a;white-space:nowrap;color:#ddd}
-#rcp-body th{background:#222;color:#bbb;position:sticky;top:0}
-#rcp-body .rcp-num{text-align:right}
-#rcp-body tr.rcp-row-best td{background:#16301c}
-#rcp-body tr.rcp-row-blocked td{color:#777}
-.rcp-controls{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
-.rcp-controls select{background:#141414;color:#ddd;border:1px solid #333;padding:6px 8px;border-radius:4px;min-width:200px}
 .rcp-btn{background:#2a2a2a;color:#ddd;border:1px solid #444;padding:6px 12px;border-radius:4px;cursor:pointer}
 .rcp-btn:hover{background:#333}
 .rcp-btn.rcp-primary{background:#1f8a4c;border-color:#1f8a4c;color:#fff}
-.rcp-sub{color:#888;font-size:11px}
-.rcp-empty{padding:40px;text-align:center;color:#888}
-.rcp-auth{max-width:520px;margin:24px auto;text-align:center}
+.rcp-auth{max-width:520px;margin:12px auto;text-align:center}
 .rcp-auth h3{margin:0 0 8px;color:#fff}
 .rcp-auth p{color:#bbb;margin:8px 0}
 .rcp-auth input{width:100%;box-sizing:border-box;background:#141414;color:#ddd;border:1px solid #333;padding:8px 10px;border-radius:4px;margin:8px 0}
 .rcp-err{color:#e08f8f;min-height:16px;font-size:12px}
 .rcp-note{color:#888;font-size:11px;margin-top:12px;text-align:left;background:#141414;border:1px solid #2a2a2a;border-radius:4px;padding:10px}
-.rcp-status{font-size:11px;color:#888;padding:4px 16px;border-top:1px solid #333;background:#141414}
+.rcp-msg{color:#8fe08f;font-size:12px;min-height:16px;margin-top:8px}
 `;
 
     class UI {
@@ -805,8 +761,6 @@
             this.data = data;
             this.api = data.api;
             this.page = page;
-            this.activeTab = "picker";
-            this.trackId = null;
             this._el = null;
         }
 
@@ -831,18 +785,10 @@
                         </span>
                         <button class="rcp-close" aria-label="close">&times;</button>
                     </h2>
-                    <div id="rcp-tabs">
-                        <button data-tab="picker" class="rcp-active">Best car</button>
-                        <button data-tab="settings">Settings</button>
-                    </div>
                     <div id="rcp-body"></div>
-                    <div class="rcp-status" id="rcp-status">—</div>
                 </div>`;
             overlay.addEventListener("click", (e) => { if (e.target === overlay) this.toggle(false); });
             overlay.querySelector(".rcp-close").addEventListener("click", () => this.toggle(false));
-            overlay.querySelectorAll("#rcp-tabs button").forEach((b) => {
-                b.addEventListener("click", () => this.switchTab(b.dataset.tab));
-            });
             document.body.appendChild(overlay);
             this._el = overlay;
         }
@@ -853,24 +799,10 @@
             if (should) this.render();
         }
 
-        setStatus(t) { this._el.querySelector("#rcp-status").textContent = t; }
-
-        switchTab(tab) {
-            this.activeTab = tab;
-            this._el.querySelectorAll("#rcp-tabs button").forEach((b) => {
-                b.classList.toggle("rcp-active", b.dataset.tab === tab);
-            });
-            this.render();
-        }
-
         render() {
             const body = this._el.querySelector("#rcp-body");
             if (!this.api.key) return this._renderAuth(body);
-            if (this.activeTab === "settings") return this._renderSettings(body);
-            return this._renderPicker(body).catch((e) => {
-                body.innerHTML = `<div class="rcp-empty">Failed to load: ${escapeHtml(e.message)}</div>`;
-                this.setStatus("Error.");
-            });
+            return this._renderSettings(body);
         }
 
         _renderAuth(body) {
@@ -909,80 +841,28 @@
             body.innerHTML = `
                 <p>API key: <b>${escapeHtml(masked)}</b></p>
                 <button class="rcp-btn" id="rcp-key-change">Change key</button>
-                <button class="rcp-btn" id="rcp-cache-clear">Clear cached data</button>
+                <button class="rcp-btn" id="rcp-cache-clear">Refresh data</button>
+                <div class="rcp-msg" id="rcp-msg"></div>
                 <div class="rcp-note">
+                    While a race is open, a row on the race page and on the Change Car page shows
+                    the best of your cars for the track.<br><br>
                     <b>How the best car is picked</b><br>
                     1. If your car's model is in the track's top-5 lap records (any class), its record
-                    lap is used. This compares car models at their best, so a model that is faster on
-                    this track wins even if you never raced it there.<br>
+                    lap is used. So a model that is faster on this track wins, even if you never raced
+                    it there.<br>
                     2. If the model has no record, your own best lap with that model is used, scaled by
-                    how far your laps are from the records on the same track (or other tracks).<br>
+                    how far your laps are from the records.<br>
                     3. Cars with no data rank last. Race limits (car class, car model, stock car) are
-                    respected.<br><br>
-                    Track records are cached for 12 h, your cars for 5 min, your laps for 15 min.
+                    respected.
                 </div>`;
             body.querySelector("#rcp-key-change").addEventListener("click", () => {
-                KeyResolver.clear(); this.api.setKey(""); this.render();
+                KeyResolver.clear(); this.api.setKey(""); this.page?.rescan(); this.render();
             });
             body.querySelector("#rcp-cache-clear").addEventListener("click", () => {
-                Cache.clear(); this.setStatus("Cache cleared."); this.page?.rescan();
-            });
-        }
-
-        async _renderPicker(body) {
-            body.innerHTML = `<div class="rcp-empty">Loading…</div>`;
-            this.setStatus("Loading tracks…");
-            const tracks = await this.data.tracks();
-            const last = readJson(LS.lastRace);
-            if (this.trackId == null) this.trackId = last?.trackId ?? tracks[0]?.id;
-            const requirements = last && last.trackId === this.trackId ? last.requirements : null;
-
-            this.setStatus("Loading cars and records…");
-            const { rows, best, ratio } = await this.data.rankForTrack(this.trackId, requirements);
-            const track = tracks.find((t) => t.id === this.trackId);
-
-            const opts = tracks.map((t) =>
-                `<option value="${t.id}" ${t.id === this.trackId ? "selected" : ""}>${escapeHtml(t.title)}</option>`).join("");
-            const tableRows = rows.map((r, i) => {
-                const cls = best && best.car.id === r.car.id ? "rcp-row-best" : (r.eligible ? "" : "rcp-row-blocked");
-                const name = r.car.car_name ? `${r.car.car_name} (${r.car.car_item_name})` : r.car.car_item_name;
-                return `<tr class="${cls}">
-                    <td>${r.eligible ? i + 1 : "—"}</td>
-                    <td>${escapeHtml(name)}</td>
-                    <td>${escapeHtml(r.car.class)}</td>
-                    <td class="rcp-num">${formatLap(r.est)}</td>
-                    <td class="rcp-num">${formatLap(r.record?.lap)}</td>
-                    <td class="rcp-num">${formatLap(r.ownLap)}</td>
-                    <td class="rcp-sub">${escapeHtml(r.eligible ? sourceLabel(r) : "not allowed in race")}</td>
-                </tr>`;
-            }).join("");
-
-            body.innerHTML = `
-                <div class="rcp-controls">
-                    <select id="rcp-track">${opts}</select>
-                    <button class="rcp-btn" id="rcp-refresh">Refresh</button>
-                </div>
-                <p class="rcp-sub">${escapeHtml(track?.description || "")}</p>
-                ${requirements ? `<p class="rcp-sub">Race limits from your last race on this track are applied.</p>` : ""}
-                <table>
-                    <thead><tr>
-                        <th>#</th><th>Car</th><th>Class</th>
-                        <th class="rcp-num">Est. lap</th><th class="rcp-num">Model record</th>
-                        <th class="rcp-num">Your best</th><th>Source</th>
-                    </tr></thead>
-                    <tbody>${tableRows}</tbody>
-                </table>
-                <p class="rcp-sub">${ratio ? `Your laps are ${((ratio - 1) * 100).toFixed(1)}% slower than the records on average.` : ""}</p>`;
-            body.querySelector("#rcp-track").addEventListener("change", (e) => {
-                this.trackId = Number(e.target.value);
-                this.render();
-            });
-            body.querySelector("#rcp-refresh").addEventListener("click", () => {
                 Cache.clear();
-                this.render();
                 this.page?.rescan();
+                body.querySelector("#rcp-msg").textContent = "Data refreshed.";
             });
-            this.setStatus(best ? `Best for ${track?.title}: ${best.car.car_name || best.car.car_item_name}` : "No eligible car.");
         }
     }
 

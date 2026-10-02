@@ -1,10 +1,15 @@
 # Torn Race Car Picker
 
-A [Torn City](https://www.torn.com) userscript that picks your **best enlisted car for the track of your current race**.
+A [Torn City](https://www.torn.com) userscript that shows the **best of your enlisted cars for the track of your current race**.
 
-- On the race page, the **Change Car** button glows green when you own a better car for this track. A label shows the better car.
-- On the car selection page, every car gets a rank and an estimated lap time. The best car gets a green frame and a **★ Best** label.
-- The footer menu opens a panel where you can see the ranking of your cars for any track.
+While a race is open, one row shows on the race page (in the **Current car** box) and on the **Change Car** page:
+
+> Best car for Docks: **Edomondo NSX** · est. lap 02:42.84 (your lap, scaled to records) — ✓ you use it
+
+- **Green** — your current car is already the best model for the track.
+- **Amber** — another of your cars is better: change to it.
+
+When the race has started, the row is hidden (you can no longer change car). The footer menu opens a small panel for the API key.
 
 Works on desktop browsers (Tampermonkey / Violentmonkey) and inside **Torn PDA**.
 

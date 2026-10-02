@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { rankCars, isEligible, formatLap, median } = require("../race-car-picker.user.js");
+const { rankCars, isEligible, formatLap, median, bestRowState } = require("../race-car-picker.user.js");
 
 function car(id, model, cls, extra = {}) {
     return {
@@ -245,4 +245,23 @@ test("the best own lap of a model is used when there are several", () => {
 
     // Then
     assert.equal(rows[0].ownLap, 62.48);
+});
+
+test("bestRowState is current when the page car model is the best model", () => {
+    const best = { car: car(1, 78, "A", { car_item_name: "Edomondo NSX" }) };
+    assert.equal(bestRowState(best, "Edomondo NSX"), "current");
+    assert.equal(bestRowState(best, " Edomondo NSX "), "current");
+});
+
+test("bestRowState is change when the page car model is another model", () => {
+    const best = { car: car(1, 78, "A", { car_item_name: "Edomondo NSX" }) };
+    assert.equal(bestRowState(best, "Echo S4"), "change");
+    assert.equal(bestRowState(best, "Edomondo"), "change");
+});
+
+test("bestRowState is unknown without a best car or a page car model", () => {
+    const best = { car: car(1, 78, "A", { car_item_name: "Edomondo NSX" }) };
+    assert.equal(bestRowState(null, "Edomondo NSX"), "unknown");
+    assert.equal(bestRowState(best, undefined), "unknown");
+    assert.equal(bestRowState(best, ""), "unknown");
 });
