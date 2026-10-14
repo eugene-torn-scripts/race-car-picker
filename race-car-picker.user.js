@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.4.0
+// @version      2.4.1
 // @description  Shows the best car you own for the current race track, and a car plan with the best car and build for every track.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.4.0";
+    const VERSION = "2.4.1";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -585,7 +585,7 @@
         const idealHtml = `${escapeHtml(best.ideal.car)} <span class="rcp-build">${best.ideal.build}</span>`
             + (best.ideal.alt ? ` <span class="rcp-dim">(not purchasable; alt: ${escapeHtml(best.ideal.alt)})</span>` : "");
         if (!best.car) return `${t}: you own no car for this track. Ideal: ${idealHtml}${info}`;
-        const name = best.car.car_name ? ` "${escapeHtml(best.car.car_name)}"` : "";
+        const name = best.car.car_name && best.car.car_name !== best.build ? ` "${escapeHtml(best.car.car_name)}"` : "";
         const verdict = {
             current: "✓ you use it",
             change: "change to it",
