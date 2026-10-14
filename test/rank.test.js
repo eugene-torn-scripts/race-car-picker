@@ -1,103 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-    fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack, carBuild, purchaseList,
+    buildParts, planForTrack, carBuild, purchaseList, bestOwnedCar, currentCarState,
     PLANS, NOT_PURCHASABLE, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
 } = require("../race-car-picker.user.js");
-
-function rec(model, lap, driver = "X") {
-    return { model, name: `Model ${model}`, lap, driver };
-}
-
-const emptyRecords = { A: [], B: [], C: [], D: [], E: [] };
-
-test("formatLap formats minutes and hundredths", () => {
-    assert.equal(formatLap(62.48), "01:02.48");
-    assert.equal(formatLap(5.5), "00:05.50");
-});
-
-test("formatLap returns dash for missing or invalid values", () => {
-    assert.equal(formatLap(null), "—");
-    assert.equal(formatLap(undefined), "—");
-    assert.equal(formatLap(Infinity), "—");
-});
-
-test("fastestByClass picks the fastest record of each class, in class order", () => {
-    // Given
-    const records = {
-        ...emptyRecords,
-        A: [rec(519, 26.2, "Storm"), rec(519, 26.19, "Toxic"), rec(78, 26.5)],
-        C: [rec(511, 29.1)],
-        E: [rec(501, 32.14)],
-    };
-
-    // When
-    const byClass = fastestByClass(records, null);
-
-    // Then
-    assert.deepEqual(byClass.map((r) => [r.cls, r.model, r.lap, r.driver]), [
-        ["A", 519, 26.19, "Toxic"],
-        ["C", 511, 29.1, "X"],
-        ["E", 501, 32.14, "X"],
-    ]);
-});
-
-test("fastestByClass keeps only the race class when the race has a class limit", () => {
-    const records = { ...emptyRecords, A: [rec(519, 26.19)], B: [rec(87, 28)] };
-
-    const byClass = fastestByClass(records, { car_class: "B" });
-
-    assert.deepEqual(byClass.map((r) => [r.cls, r.model]), [["B", 87]]);
-});
-
-test("fastestByClass keeps only the race model when the race has a model limit", () => {
-    const records = { ...emptyRecords, A: [rec(519, 26.19), rec(78, 26.5)], B: [rec(78, 27)] };
-
-    const byClass = fastestByClass(records, { car_item_id: 78 });
-
-    assert.deepEqual(byClass.map((r) => [r.cls, r.model, r.lap]), [["A", 78, 26.5], ["B", 78, 27]]);
-});
-
-test("fastestByClass returns an empty list when no record matches", () => {
-    assert.deepEqual(fastestByClass(emptyRecords, null), []);
-    assert.deepEqual(fastestByClass({ ...emptyRecords, A: [rec(519, 26.19)] }, { car_item_id: 1 }), []);
-    assert.deepEqual(fastestByClass(null, null), []);
-    assert.deepEqual(fastestByClass({ A: [rec(519, 26.19)] }, null).map((r) => r.cls), ["A"]);
-});
-
-test("fastestCar returns the fastest record across classes", () => {
-    const byClass = [
-        { ...rec(501, 32.14), cls: "E" },
-        { ...rec(519, 26.19), cls: "A" },
-        { ...rec(511, 29.1), cls: "C" },
-    ];
-
-    assert.equal(fastestCar(byClass).model, 519);
-});
-
-test("fastestCar keeps the first record on a tie", () => {
-    const byClass = [{ ...rec(1, 30), cls: "A" }, { ...rec(2, 30), cls: "B" }];
-
-    assert.equal(fastestCar(byClass).model, 1);
-});
-
-test("fastestCar returns null for an empty list", () => {
-    assert.equal(fastestCar([]), null);
-});
-
-test("bestRowState is current when the page car is the fastest model", () => {
-    assert.equal(bestRowState(rec(519, 26.19), " Model 519 "), "current");
-});
-
-test("bestRowState is change when the page car is another model", () => {
-    assert.equal(bestRowState(rec(519, 26.19), "Model 78"), "change");
-});
-
-test("bestRowState is unknown without a best record or a page car", () => {
-    assert.equal(bestRowState(null, "Model 78"), "unknown");
-    assert.equal(bestRowState(rec(519, 26.19), null), "unknown");
-    assert.equal(bestRowState(rec(519, 26.19), ""), "unknown");
-});
 
 test("buildParts gives tarmac parts with a short paddle-shift gearbox and stage two turbo", () => {
     assert.deepEqual(buildParts("TS2"), [
@@ -254,4 +160,117 @@ test("purchaseList lists alternative tracks and marks a not-purchasable car", ()
 
 test("purchaseList has no alternative tracks in the recommended plan", () => {
     assert.ok(purchaseList([], recommended).every((i) => i.altTracks.length === 0 && i.purchasable));
+});
+
+const TS3 = [46, 85, 99];
+const TS2 = [46, 85, 81];
+const DS3 = [47, 87, 99];
+const TL3 = [46, 84, 99];
+
+function car(name, parts, extra = {}) {
+    return { car_item_name: name, parts, class: "A", car_name: null, ...extra };
+}
+
+test("bestOwnedCar picks the ideal car and build when you own it", () => {
+    // Given
+    const cars = [car("Edomondo NSX", TS3), car("Edomondo NSX", TS2)];
+
+    // When
+    const best = bestOwnedCar(cars, "Sewage");
+
+    // Then
+    assert.equal(best.car, cars[1]);
+    assert.deepEqual([best.build, best.match], ["TS2", "plan"]);
+});
+
+test("bestOwnedCar falls back to the recommended build", () => {
+    const cars = [car("Edomondo NSX", TS3)];
+
+    const best = bestOwnedCar(cars, "Sewage");
+
+    assert.deepEqual([best.car, best.build, best.match, best.ideal.build], [cars[0], "TS3", "plan", "TS2"]);
+});
+
+test("bestOwnedCar uses the alternative car when the ideal car is not purchasable", () => {
+    const cars = [car("Edomondo NSX", TS3), car("Mercia SLR", TL3)];
+
+    const best = bestOwnedCar(cars, "Convict");
+
+    assert.deepEqual([best.car, best.match, best.ideal.car], [cars[1], "plan", "Stormatti Casteon"]);
+});
+
+test("bestOwnedCar falls back to a car with the correct surface build, planned model and class first", () => {
+    // Given
+    const cars = [
+        car("Volt GT", TS3, { class: "A" }),
+        car("Echo S4", TL3, { class: "B" }),
+        car("Edomondo NSX", DS3),
+    ];
+
+    // When
+    const docks = bestOwnedCar(cars, "Docks");
+    const speedway = bestOwnedCar([cars[1], car("Bavaria Z8", TL3, { class: "C" })], "Speedway");
+
+    // Then
+    assert.deepEqual([docks.car, docks.build, docks.match], [cars[0], "TS3", "surface"]);
+    assert.equal(speedway.car, cars[1]);
+});
+
+test("bestOwnedCar prefers a planned model with the correct surface over another class A car", () => {
+    const other = car("Lambrini Torobravo", TS3);
+    const lfa = car("Veloria LFA", [46, 85, 81]);
+
+    const best = bestOwnedCar([other, lfa], "Speedway");
+
+    assert.deepEqual([best.car, best.match], [lfa, "surface"]);
+});
+
+test("bestOwnedCar falls back to a planned model with the wrong surface build", () => {
+    const cars = [car("Edomondo NSX", TS3)];
+
+    const best = bestOwnedCar(cars, "Parkland");
+
+    assert.deepEqual([best.car, best.build, best.match], [cars[0], "TS3", "model"]);
+});
+
+test("bestOwnedCar reports no car when you own nothing useful", () => {
+    const best = bestOwnedCar([car("Nano Pioneer", [])], "Mudpit");
+
+    assert.deepEqual([best.car, best.match, best.ideal.car], [null, "none", "Colina Tanprice"]);
+    assert.equal(bestOwnedCar(null, "Mudpit").match, "none");
+});
+
+test("bestOwnedCar returns null for an unknown track", () => {
+    assert.equal(bestOwnedCar([car("Edomondo NSX", TS3)], "Nowhere"), null);
+    assert.equal(bestOwnedCar([], ""), null);
+});
+
+test("currentCarState is unknown without a best car or a current model", () => {
+    const best = { car: car("Edomondo NSX", TS3) };
+    assert.equal(currentCarState(null, [], { model: "Edomondo NSX" }), "unknown");
+    assert.equal(currentCarState({ car: null }, [], { model: "Edomondo NSX" }), "unknown");
+    assert.equal(currentCarState(best, [], null), "unknown");
+    assert.equal(currentCarState(best, [], { model: undefined }), "unknown");
+});
+
+test("currentCarState compares custom car names when both are known", () => {
+    const best = { car: car("Edomondo NSX", DS3, { car_name: "NSX dirt" }) };
+
+    assert.equal(currentCarState(best, [], { model: "Edomondo NSX", name: "NSX dirt" }), "current");
+    assert.equal(currentCarState(best, [], { model: "Edomondo NSX", name: "NSX tarmac" }), "change");
+});
+
+test("currentCarState compares models when names are not known", () => {
+    const nsx = car("Edomondo NSX", TS3);
+    const best = { car: nsx };
+
+    assert.equal(currentCarState(best, [nsx], { model: "Edomondo NSX", name: null }), "current");
+    assert.equal(currentCarState(best, [nsx], { model: "Veloria LFA", name: null }), "change");
+});
+
+test("currentCarState asks to check the build when you own 2 cars of the same model", () => {
+    const a = car("Edomondo NSX", TS3);
+    const b = car("Edomondo NSX", DS3);
+
+    assert.equal(currentCarState({ car: a }, [a, b], { model: "Edomondo NSX", name: null }), "check");
 });

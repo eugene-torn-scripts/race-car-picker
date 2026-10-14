@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.3.0
-// @description  Shows the fastest car model for the current race track, picked from the global lap records.
+// @version      2.4.0
+// @description  Shows the best car you own for the current race track, and a car plan with the best car and build for every track.
 // @author       lannav
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.3.0";
+    const VERSION = "2.4.0";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -143,19 +143,12 @@
     ];
 
     const TTL = {
-        tracks: 7 * 24 * 3600_000,
-        records: 12 * 3600_000,
-        race: 60_000,
         cars: 5 * 60_000,
-        activeRace: 60_000,
-        lastRace: 6 * 3600_000,
     };
 
     const LS = {
         apiKey: "rcp_apiKey",
         cachePrefix: "rcp_cache_",
-        currentCar: "rcp_currentCar",
-        lastRace: "rcp_lastRace",
         planView: "rcp_planView",
     };
 
@@ -167,13 +160,6 @@
     function escapeHtml(s) {
         return String(s ?? "").replace(/[&<>"']/g, (c) =>
             ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-    }
-
-    function formatLap(seconds) {
-        if (seconds == null || !isFinite(seconds)) return "—";
-        const m = Math.floor(seconds / 60);
-        const s = seconds - m * 60;
-        return `${String(m).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
     }
 
     function readJson(key) {
@@ -189,10 +175,6 @@
             const entry = readJson(LS.cachePrefix + name);
             if (entry && Date.now() - entry.ts < ttl) return entry.data;
             return undefined;
-        },
-        peek(name) {
-            const entry = readJson(LS.cachePrefix + name);
-            return entry ? entry.data : undefined;
         },
         set(name, data) { writeJson(LS.cachePrefix + name, { ts: Date.now(), data }); },
         names() {
@@ -302,20 +284,6 @@
             return data;
         }
 
-        tracks() {
-            return this._cached("tracks", TTL.tracks, async () => {
-                const d = await this.api.get("/racing/tracks");
-                return (d.tracks || []).map((t) => ({ id: t.id, title: t.title, description: t.description }));
-            });
-        }
-
-        async trackByTitle(title) {
-            const wanted = (title || "").trim().toLowerCase();
-            if (!wanted) return null;
-            const tracks = await this.tracks();
-            return tracks.find((t) => t.title.toLowerCase() === wanted) || null;
-        }
-
         cars() {
             return this._cached("cars", TTL.cars, async () => {
                 const d = await this.api.get("/user/enlistedcars");
@@ -323,59 +291,6 @@
             });
         }
 
-        trackRecords(trackId) {
-            return this._cached(`records_${trackId}`, TTL.records, async () => {
-                const byClass = {};
-                for (const cls of CAR_CLASSES) {
-                    const d = await this.api.get(`/racing/${trackId}/records`, { cat: cls });
-                    byClass[cls] = (d.records || []).map((r) => ({
-                        model: r.car_item_id,
-                        name: r.car_item_name,
-                        lap: r.lap_time,
-                        driver: r.driver_name,
-                    }));
-                }
-                return byClass;
-            });
-        }
-
-        race(raceId) {
-            return this._cached(`race_${raceId}`, TTL.race, async () => (await this.api.get(`/racing/${raceId}/race`)).race);
-        }
-
-        async fastestForTrack(trackId, requirements) {
-            const byClass = fastestByClass(await this.trackRecords(trackId), requirements);
-            return { best: fastestCar(byClass), byClass };
-        }
-
-        activeRace() {
-            return this._cached("activeRace", TTL.activeRace, async () => {
-                const d = await this.api.get("/user/races", { limit: 5, sort: "DESC" });
-                return (d.races || []).find((r) => r.status !== "finished") || null;
-            });
-        }
-    }
-
-    function fastestByClass(records, requirements) {
-        const out = [];
-        for (const cls of CAR_CLASSES) {
-            if (requirements?.car_class && cls !== requirements.car_class) continue;
-            const list = (records?.[cls] || [])
-                .filter((r) => !requirements?.car_item_id || r.model === requirements.car_item_id);
-            if (!list.length) continue;
-            const top = list.reduce((a, b) => (b.lap < a.lap ? b : a));
-            out.push({ ...top, cls });
-        }
-        return out;
-    }
-
-    function fastestCar(byClass) {
-        return byClass.reduce((a, b) => (!a || b.lap < a.lap ? b : a), null);
-    }
-
-    function bestRowState(best, currentModelName) {
-        if (!best || !currentModelName) return "unknown";
-        return best.name === currentModelName.trim() ? "current" : "change";
     }
 
     function buildParts(build) {
@@ -415,9 +330,46 @@
         });
     }
 
+    function bestOwnedCar(cars, trackTitle) {
+        const ideal = planForTrack(PLANS.ideal, trackTitle);
+        const rec = planForTrack(PLANS.recommended, trackTitle);
+        if (!ideal || !rec) return null;
+        const wanted = [
+            { car: ideal.car, build: ideal.build },
+            ideal.alt && { car: ideal.alt, build: ideal.build },
+            { car: rec.car, build: rec.build },
+        ].filter(Boolean);
+        const pool = cars || [];
+        for (const w of wanted) {
+            const car = pool.find((c) => c.car_item_name === w.car && carBuild(c) === w.build);
+            if (car) return { car, build: w.build, match: "plan", ideal };
+        }
+        const surface = rec.build[0];
+        const plannedModels = wanted.map((w) => w.car);
+        const rank = (c) => [plannedModels.includes(c.car_item_name) ? 0 : 1, CAR_CLASSES.indexOf(c.class)];
+        const bySurface = pool
+            .filter((c) => carBuild(c)?.[0] === surface)
+            .sort((a, b) => {
+                const [ra, rb] = [rank(a), rank(b)];
+                return ra[0] - rb[0] || ra[1] - rb[1];
+            });
+        if (bySurface.length) return { car: bySurface[0], build: carBuild(bySurface[0]), match: "surface", ideal };
+        const byModel = pool.find((c) => plannedModels.includes(c.car_item_name));
+        if (byModel) return { car: byModel, build: carBuild(byModel), match: "model", ideal };
+        return { car: null, build: null, match: "none", ideal };
+    }
+
+    function currentCarState(best, cars, current) {
+        if (!best?.car || !current?.model) return "unknown";
+        if (best.car.car_name && current.name) return best.car.car_name === current.name ? "current" : "change";
+        if (best.car.car_item_name !== current.model) return "change";
+        const sameModel = (cars || []).filter((c) => c.car_item_name === current.model).length;
+        return sameModel > 1 ? "check" : "current";
+    }
+
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
-            fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack, carBuild, purchaseList,
+            buildParts, planForTrack, carBuild, purchaseList, bestOwnedCar, currentCarState,
             PLANS, NOT_PURCHASABLE, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
         };
         return;
@@ -611,6 +563,7 @@
 .rcp-row.rcp-current{background:#16301c;border-color:#2e6b3c}
 .rcp-row b{color:#fff}
 .rcp-row .rcp-dim{color:#999}
+.rcp-row .rcp-build{font-family:ui-monospace,Menlo,monospace;color:#e6c27a}
 .rcp-row .rcp-verdict{font-weight:600;color:#e6c27a}
 .rcp-row .rcp-info{display:inline-block;width:18px;height:18px;margin-left:6px;padding:0;border-radius:50%;
     border:1px solid #888;background:transparent;color:#ddd;font:italic 700 12px/16px Georgia,serif;cursor:pointer;vertical-align:middle}
@@ -626,28 +579,32 @@
         document.head.appendChild(s);
     }
 
-    function bestRowHtml(trackTitle, best, byClass, state) {
-        const verdict = state === "current" ? "✓ you use it"
-            : state === "change" ? "change to it"
+    function ownedRowHtml(trackTitle, best, state) {
+        const t = escapeHtml(trackTitle);
+        const info = `<button type="button" class="rcp-info" title="Car plan for all tracks">i</button>`;
+        const idealHtml = `${escapeHtml(best.ideal.car)} <span class="rcp-build">${best.ideal.build}</span>`
+            + (best.ideal.alt ? ` <span class="rcp-dim">(not purchasable; alt: ${escapeHtml(best.ideal.alt)})</span>` : "");
+        if (!best.car) return `${t}: you own no car for this track. Ideal: ${idealHtml}${info}`;
+        const name = best.car.car_name ? ` "${escapeHtml(best.car.car_name)}"` : "";
+        const verdict = {
+            current: "✓ you use it",
+            change: "change to it",
+            check: `check that you use the ${best.build || "same"} one`,
+        }[state] || "";
+        const note = best.match === "surface" ? " <span class=\"rcp-dim\">(not the planned car, but the correct surface build)</span>"
+            : best.match === "model" ? " <span class=\"rcp-dim\">(wrong surface build)</span>"
             : "";
-        let html = `Fastest car for ${escapeHtml(trackTitle)}: <b>${escapeHtml(best.name)}</b> (class ${best.cls})`
-            + ` · lap <b>${formatLap(best.lap)}</b> <span class="rcp-dim">(record by ${escapeHtml(best.driver)})</span>`
+        const isIdeal = best.car.car_item_name === best.ideal.car && best.build === best.ideal.build;
+        return `${t}: best car you own — <b>${escapeHtml(best.car.car_item_name)}</b>${name} <span class="rcp-build">${best.build || "?"}</span>${note}`
             + (verdict ? ` — <span class="rcp-verdict">${verdict}</span>` : "")
-            + `<button type="button" class="rcp-info" title="Car plan for all tracks">i</button>`;
-        if (byClass.length > 1) {
-            const perClass = byClass
-                .map((r) => `${r.cls}: ${escapeHtml(r.name)} ${formatLap(r.lap)}`)
-                .join(" · ");
-            html += `<br><span class="rcp-dim">Per class — ${perClass}</span>`;
-        }
-        return html;
+            + info
+            + (isIdeal ? "" : `<br><span class="rcp-dim">Ideal:</span> ${idealHtml}`);
     }
 
     class RacingPage {
         constructor(data) {
             this.data = data;
             this._timer = null;
-            this._closedRaces = new Set();
             this._busy = new WeakSet();
             this.onInfo = null;
         }
@@ -684,11 +641,16 @@
             fn().catch((e) => console.warn("[RCP]", e)).finally(() => this._busy.delete(host));
         }
 
-        _showRow(anchor, position, html, state, trackTitle) {
+        async _showOwnedRow(host, anchor, position, trackTitle, current) {
+            if (!planForTrack(PLANS.recommended, trackTitle)) return;
+            const cars = await this.data.cars();
+            if (host.querySelector(".rcp-row")) return;
+            const best = bestOwnedCar(cars, trackTitle);
+            const state = currentCarState(best, cars, current);
             const row = document.createElement("div");
             row.className = "rcp-row" + (state === "current" ? " rcp-current" : "");
-            row.innerHTML = html;
-            row.querySelector(".rcp-info")?.addEventListener("click", (e) => {
+            row.innerHTML = ownedRowHtml(trackTitle, best, state);
+            row.querySelector(".rcp-info").addEventListener("click", (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 this.onInfo?.(trackTitle);
@@ -696,36 +658,18 @@
             anchor.insertAdjacentElement(position, row);
         }
 
-        _raceIdFromPage() {
-            const fromUrl = new URLSearchParams(location.search).get("raceID");
-            if (fromUrl) return fromUrl;
-            const dataId = document.querySelector("#leaderBoard li[data-id]")?.getAttribute("data-id") || "";
-            const m = /^(\d+)-/.exec(dataId);
-            return m ? m[1] : null;
+        _trackFromTitle(text) {
+            return (text || "").split(" - ")[0].trim();
         }
 
         async handleRacePage(carBox) {
-            const raceId = this._raceIdFromPage();
-            if (raceId && this._closedRaces.has(raceId)) return;
-            const race = raceId
-                ? await this.data.race(raceId).catch(() => null)
-                : await this.data.activeRace().catch(() => null);
-            if (!race) return;
-            if (race.status !== "open") { this._closedRaces.add(String(race.id)); return; }
-
-            writeJson(LS.lastRace, {
-                raceId: race.id, trackId: race.track_id, requirements: race.requirements, ts: Date.now(),
-            });
-
-            const [{ best, byClass }, tracks] = await Promise.all([
-                this.data.fastestForTrack(race.track_id, race.requirements),
-                this.data.tracks(),
-            ]);
-            if (!best || carBox.querySelector(".rcp-row")) return;
-            const trackTitle = tracks.find((t) => t.id === race.track_id)?.title || "this track";
-            const currentModel = carBox.querySelector(".model-wrap .img[title]")?.getAttribute("title");
-            const state = bestRowState(best, currentModel);
-            this._showRow(carBox, "beforeend", bestRowHtml(trackTitle, best, byClass, state), state, trackTitle);
+            const titleEl = document.querySelector(".drivers-list .title-black");
+            const trackTitle = this._trackFromTitle(titleEl?.firstChild?.textContent || titleEl?.textContent);
+            const current = {
+                model: carBox.querySelector(".model-wrap .img[title]")?.getAttribute("title")?.trim(),
+                name: carBox.querySelector(".model-wrap .model p:nth-child(2)")?.textContent.trim() || null,
+            };
+            await this._showOwnedRow(carBox, carBox, "beforeend", trackTitle, current);
         }
 
         _currentRaceBlock(wrap) {
@@ -735,28 +679,12 @@
             return null;
         }
 
-        async _requirementsFor(trackId) {
-            const last = readJson(LS.lastRace);
-            if (last && last.trackId === trackId && Date.now() - last.ts < TTL.lastRace) return last.requirements;
-            const active = await this.data.activeRace().catch(() => null);
-            if (active && active.track_id === trackId) return active.requirements;
-            return null;
-        }
-
         async handleChangePage(wrap, list) {
             const block = this._currentRaceBlock(wrap);
-            const title = (block?.querySelector(".enlisted-btn-wrap")?.textContent || "").split(" - ")[0];
-            const track = await this.data.trackByTitle(title);
-            if (!track) return;
-
-            const requirements = await this._requirementsFor(track.id);
-            const { best, byClass } = await this.data.fastestForTrack(track.id, requirements);
-            if (!best || wrap.querySelector(".rcp-row")) return;
-
+            const trackTitle = this._trackFromTitle(block?.querySelector(".enlisted-btn-wrap")?.textContent);
             const currentLi = [...list.querySelectorAll(":scope > li")].find((li) => li.querySelector(".icon-in-race"));
-            const currentModel = currentLi?.querySelector(".model .bold")?.textContent.trim();
-            const state = bestRowState(best, currentModel);
-            this._showRow(block || list, block ? "afterend" : "beforebegin", bestRowHtml(track.title, best, byClass, state), state, track.title);
+            const current = { model: currentLi?.querySelector(".model .bold")?.textContent.trim(), name: null };
+            await this._showOwnedRow(wrap, block || list, block ? "afterend" : "beforebegin", trackTitle, current);
         }
     }
 
@@ -892,10 +820,8 @@
                 <button class="rcp-btn" id="rcp-plan-open">Car plan</button>
                 <div class="rcp-msg" id="rcp-msg"></div>
                 <div class="rcp-note">
-                    While a race is open, a row on the race page and on the Change Car page shows
-                    the fastest car model for the track. It is the model with the best lap in the
-                    track's top-5 lap records. The race class and car model limits are respected.
-                    The row also shows the fastest model in each class.
+                    On the race page and on the Change Car page, a row shows the best car you own
+                    for the track, from the car plan. It also tells you if you use it now.
                 </div>`;
             body.querySelector("#rcp-key-change").addEventListener("click", () => {
                 KeyResolver.clear(); this.api.setKey(""); this.page?.rescan(); this.render();

@@ -1,21 +1,35 @@
 # Torn Race Car Picker
 
-A [Torn City](https://www.torn.com) userscript that shows the **fastest car model for the track of your current race**.
+A [Torn City](https://www.torn.com) userscript that shows the **best car you own for the track of your current race**, and a **car plan** with the best car and build for every track.
 
-While a race is open, one row shows on the race page (in the **Current car** box) and on the **Change Car** page:
+## Race row
 
-> Fastest car for Speedway: **Stormatti Casteon** (class A) · lap 00:26.19 (record by ToxicMonkeyMZC) — change to it
-> Per class — A: Stormatti Casteon 00:26.19 · B: Bavaria M5 00:27.50 · C: Oceania SS 00:28.81 · D: Tabata RM2 00:30.31 · E: Stålhög 860 00:32.14
+On the race page (in the **Current car** box) and on the **Change Car** page, one row shows:
 
-- **Green** — your current car is already the fastest model.
-- **Amber** — another model is faster.
+> Sewage: best car you own — **Edomondo NSX** TS3 — ✓ you use it (i)
+> Ideal: Edomondo NSX TS2
 
-The footer icon opens the **car plan** directly (once the API key is set). It starts with a **list of cars to buy, in priority order**. Cars you already own with the correct build are marked ✓ owned (read from `/user/enlistedcars` and the car parts). A part change deletes the old part, so each build is a separate car. A toggle switches between 2 plans:
+- **Green** — you already use the best car you own.
+- **Amber** — change to the car in the row. If you own 2 cars of the same model, the row asks you to check that you use the one with the correct build. Give your cars custom names to remove this check: the row then compares the names.
+- **Ideal** shows the best car and build for the track, if you do not own it.
+
+The track name and the current car come from the page. The Torn API has no data for a race before it ends.
+
+How the best owned car is picked, in this order:
+
+1. The ideal car and build for the track (or its purchasable alternative).
+2. The recommended car and build.
+3. Any of your cars with the correct surface build (tarmac or dirt). Planned models first, then by class.
+4. A planned model with the wrong surface build.
+
+## Car plan
+
+The footer icon opens the **car plan** directly (once the API key is set). The **i** button in the row opens it too. It starts with a **list of cars to buy, in priority order**. Cars you already own with the correct build are marked ✓ owned. A part change deletes the old part, so each build is a separate car. A toggle switches between 2 plans:
 
 - **Recommended (7 cars)** — one NSX build per surface, so you need fewer cars.
 - **Ideal (11 cars)** — the best car and build for each track. Stormatti Casteon (Speedway, Uptown, Convict) is not purchasable, so it is marked as such, with a purchasable alternative in brackets (Veloria LFA, Mercia SLR).
 
-You can also click the **i** button in the row to open the **car plan**: a table with the car and build for every track. The row of the current track is highlighted, and the exact parts for its build are listed. The footer panel also has a **Car plan** button.
+Below the list, a table gives the car and build for every track. The row of the current track is highlighted, and the exact parts for its build are listed.
 
 Build codes (from the community guide in the Torn Racing Guide userscript):
 
@@ -26,29 +40,9 @@ Build codes (from the community guide in the Torn Racing Guide userscript):
 
 All builds also take the same 41 base parts (shown in the popup). Safety-only parts are left out.
 
-When the race has started, the row is hidden (you can no longer change car). The footer menu opens a small panel for the API key.
-
-Works on desktop browsers (Tampermonkey / Violentmonkey) and inside **Torn PDA**.
-
----
-
-## How the fastest car is picked
-
-The script reads the track's global top-5 lap records for each class (A–E). The model with the best lap wins. The row also shows the fastest model in each class, so you can pick a car you own.
-
-If the race has a car class limit or a car model limit, only records that match the limit are used.
-
 ## Data used
 
-All data comes from the Torn API v2:
-
-| Endpoint | Used for | Cache |
-|---|---|---|
-| `/racing/{trackId}/records?cat=A..E` | top-5 laps per class | 12 h |
-| `/racing/{raceId}/race` | track and race limits | 1 min |
-| `/user/races` | your open race (when the page has no race id) | 1 min |
-| `/racing/tracks` | track names | 7 days |
-| `/user/enlistedcars` | your cars and parts (owned check) | 5 min |
+Only one Torn API v2 endpoint: `/user/enlistedcars` (your cars and their parts), cached for 5 minutes. The build of each car is read from its tyre, gearbox and turbo parts.
 
 A **Minimal Access** key is enough. The key is stored only in your browser and is sent only to `api.torn.com`.
 
