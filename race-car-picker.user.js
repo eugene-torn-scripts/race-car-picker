@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.0.0
+// @version      2.1.0
 // @description  Shows the fastest car model for the current race track, picked from the global lap records.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.0.0";
+    const VERSION = "2.1.0";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -42,6 +42,47 @@
     const RATE_LIMIT_ERROR_CODE = 5;
     const CAR_CLASSES = ["A", "B", "C", "D", "E"];
     const KEY_RE = /^[A-Za-z0-9]{16}$/;
+
+    const TRACK_PLAN = [
+        { track: "Commerce", car: "Edomondo NSX", build: "TS2" },
+        { track: "Sewage", car: "Edomondo NSX", build: "TS2" },
+        { track: "Underdog", car: "Edomondo NSX", build: "TS2" },
+        { track: "Industrial", car: "Edomondo NSX", build: "TS3" },
+        { track: "Meltdown", car: "Edomondo NSX", build: "TS3" },
+        { track: "Vector", car: "Edomondo NSX", build: "TS3" },
+        { track: "Hammerhead", car: "Edomondo NSX", build: "DS2" },
+        { track: "Parkland", car: "Edomondo NSX", build: "DS3" },
+        { track: "Two Islands", car: "Edomondo NSX", build: "DL3" },
+        { track: "Speedway", car: "Veloria LFA", build: "TL3" },
+        { track: "Uptown", car: "Veloria LFA", build: "TL3" },
+        { track: "Withdrawal", car: "Veloria LFA", build: "TL3" },
+        { track: "Stone Park", car: "Echo R8", build: "DS3" },
+        { track: "Mudpit", car: "Colina Tanprice", build: "DL3" },
+        { track: "Docks", car: "Volt GT", build: "TL3" },
+        { track: "Convict", car: "Mercia SLR", build: "TL3" },
+    ];
+
+    const BUILD_SURFACE = {
+        T: { name: "Tarmac", parts: ["Track Tires", "Adjustable Coilover Suspension"], gearbox: "Paddle Shift Gearbox" },
+        D: { name: "Dirt", parts: ["Rally Tires", "Group N Rally Suspension"], gearbox: "Rally Gearbox" },
+    };
+    const BUILD_RATIO = { S: "Short Ratio", L: "Long Ratio" };
+    const BUILD_TURBO = { 2: "Stage Two Turbo kit", 3: "Stage Three Turbo Kit" };
+
+    const BASE_PARTS = [
+        "Strip Out", "Racing Steering Wheel", "Lightweight Flocked Dash", "Polycarbonate Windows",
+        "Carbon Fiber Roof", "Carbon Fiber Trunk", "Carbon Fiber Hood", "Ultra-Lightweight Alloys",
+        "Air Forced Engine Cooling", "Air Cooling Ducts for Brakes", "Adjustable Rear Spoiler",
+        "Front Diffuser", "Rear Diffuser", "Fast Road Brake Fluid", "Braided Brake Hoses",
+        "Grooved and Drilled Brake Discs", "Competition Racing Brake Pads", "Brake Balance Bias Control",
+        "6 Pot Uprated Brakes", "Ported and Polished Head", "Competition Racing Fuel Pump",
+        "Competition Polished Throttle Body", "Bored Out Engine + Forged Pistons", "Front Mounted Intercooler",
+        "Stage Three Remap", "Competition Racing Camshaft", "Full Exhaust System", "Stainless Steel 4-1 Manifold",
+        "Custom Forced Induction Kit", "Super Octane Fuel Plus Nitrous", "Polyurethane Bushings Front",
+        "Polyurethane Bushings Rear", "Upper Front Strut Brace", "Lower Front Strut Brace", "Rear Strut Brace",
+        "Front Adjustable Tie Rods", "Adjustable Rear Control arms", "Quick Shift", "4 Pin Differential",
+        "Competition Racing Clutch", "Ultra-Light Flywheel",
+    ];
 
     const TTL = {
         tracks: 7 * 24 * 3600_000,
@@ -270,8 +311,22 @@
         return best.name === currentModelName.trim() ? "current" : "change";
     }
 
+    function buildParts(build) {
+        const [surface, ratio, turbo] = build;
+        const s = BUILD_SURFACE[surface];
+        return [...s.parts, `${s.gearbox} (${BUILD_RATIO[ratio]})`, BUILD_TURBO[turbo]];
+    }
+
+    function planForTrack(trackTitle) {
+        const wanted = (trackTitle || "").trim().toLowerCase();
+        return TRACK_PLAN.find((p) => p.track.toLowerCase() === wanted) || null;
+    }
+
     if (typeof module !== "undefined" && module.exports) {
-        module.exports = { fastestByClass, fastestCar, formatLap, bestRowState };
+        module.exports = {
+            fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack,
+            TRACK_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
+        };
         return;
     }
 
@@ -464,6 +519,9 @@
 .rcp-row b{color:#fff}
 .rcp-row .rcp-dim{color:#999}
 .rcp-row .rcp-verdict{font-weight:600;color:#e6c27a}
+.rcp-row .rcp-info{display:inline-block;width:18px;height:18px;margin-left:6px;padding:0;border-radius:50%;
+    border:1px solid #888;background:transparent;color:#ddd;font:italic 700 12px/16px Georgia,serif;cursor:pointer;vertical-align:middle}
+.rcp-row .rcp-info:hover{background:#444}
 .rcp-row.rcp-current .rcp-verdict{color:#8fe08f}
 `;
 
@@ -481,7 +539,8 @@
             : "";
         let html = `Fastest car for ${escapeHtml(trackTitle)}: <b>${escapeHtml(best.name)}</b> (class ${best.cls})`
             + ` · lap <b>${formatLap(best.lap)}</b> <span class="rcp-dim">(record by ${escapeHtml(best.driver)})</span>`
-            + (verdict ? ` — <span class="rcp-verdict">${verdict}</span>` : "");
+            + (verdict ? ` — <span class="rcp-verdict">${verdict}</span>` : "")
+            + `<button type="button" class="rcp-info" title="Car plan for all tracks">i</button>`;
         if (byClass.length > 1) {
             const perClass = byClass
                 .map((r) => `${r.cls}: ${escapeHtml(r.name)} ${formatLap(r.lap)}`)
@@ -497,6 +556,7 @@
             this._timer = null;
             this._closedRaces = new Set();
             this._busy = new WeakSet();
+            this.onInfo = null;
         }
 
         start() {
@@ -531,10 +591,15 @@
             fn().catch((e) => console.warn("[RCP]", e)).finally(() => this._busy.delete(host));
         }
 
-        _showRow(anchor, position, html, state) {
+        _showRow(anchor, position, html, state, trackTitle) {
             const row = document.createElement("div");
             row.className = "rcp-row" + (state === "current" ? " rcp-current" : "");
             row.innerHTML = html;
+            row.querySelector(".rcp-info")?.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.onInfo?.(trackTitle);
+            });
             anchor.insertAdjacentElement(position, row);
         }
 
@@ -567,7 +632,7 @@
             const trackTitle = tracks.find((t) => t.id === race.track_id)?.title || "this track";
             const currentModel = carBox.querySelector(".model-wrap .img[title]")?.getAttribute("title");
             const state = bestRowState(best, currentModel);
-            this._showRow(carBox, "beforeend", bestRowHtml(trackTitle, best, byClass, state), state);
+            this._showRow(carBox, "beforeend", bestRowHtml(trackTitle, best, byClass, state), state, trackTitle);
         }
 
         _currentRaceBlock(wrap) {
@@ -598,7 +663,7 @@
             const currentLi = [...list.querySelectorAll(":scope > li")].find((li) => li.querySelector(".icon-in-race"));
             const currentModel = currentLi?.querySelector(".model .bold")?.textContent.trim();
             const state = bestRowState(best, currentModel);
-            this._showRow(block || list, block ? "afterend" : "beforebegin", bestRowHtml(track.title, best, byClass, state), state);
+            this._showRow(block || list, block ? "afterend" : "beforebegin", bestRowHtml(track.title, best, byClass, state), state, track.title);
         }
     }
 
@@ -621,6 +686,13 @@
 .rcp-err{color:#e08f8f;min-height:16px;font-size:12px}
 .rcp-note{color:#888;font-size:11px;margin-top:12px;text-align:left;background:#141414;border:1px solid #2a2a2a;border-radius:4px;padding:10px}
 .rcp-msg{color:#8fe08f;font-size:12px;min-height:16px;margin-top:8px}
+.rcp-plan{width:100%;border-collapse:collapse;font-size:12px}
+.rcp-plan th,.rcp-plan td{text-align:left;padding:5px 8px;border-bottom:1px solid #2a2a2a}
+.rcp-plan th{color:#999;font-weight:600}
+.rcp-plan tr.rcp-here td{background:#16301c;color:#fff}
+.rcp-plan .rcp-build{font-family:ui-monospace,Menlo,monospace;color:#e6c27a}
+.rcp-legend{margin-top:12px;font-size:12px;color:#bbb}
+.rcp-legend b{color:#ddd}
 `;
 
     class UI {
@@ -629,6 +701,8 @@
             this.api = data.api;
             this.page = page;
             this._el = null;
+            this._view = "settings";
+            this._planTrack = null;
         }
 
         inject() {
@@ -666,8 +740,15 @@
             if (should) this.render();
         }
 
+        open(view, planTrack = null) {
+            this._view = view;
+            this._planTrack = planTrack;
+            this.toggle(true);
+        }
+
         render() {
             const body = this._el.querySelector("#rcp-body");
+            if (this._view === "plan") return this._renderPlan(body);
             if (!this.api.key) return this._renderAuth(body);
             return this._renderSettings(body);
         }
@@ -709,6 +790,7 @@
                 <p>API key: <b>${escapeHtml(masked)}</b></p>
                 <button class="rcp-btn" id="rcp-key-change">Change key</button>
                 <button class="rcp-btn" id="rcp-cache-clear">Refresh data</button>
+                <button class="rcp-btn" id="rcp-plan-open">Car plan</button>
                 <div class="rcp-msg" id="rcp-msg"></div>
                 <div class="rcp-note">
                     While a race is open, a row on the race page and on the Change Car page shows
@@ -719,11 +801,46 @@
             body.querySelector("#rcp-key-change").addEventListener("click", () => {
                 KeyResolver.clear(); this.api.setKey(""); this.page?.rescan(); this.render();
             });
+            body.querySelector("#rcp-plan-open").addEventListener("click", () => this.open("plan"));
             body.querySelector("#rcp-cache-clear").addEventListener("click", () => {
                 Cache.clear();
                 this.page?.rescan();
                 body.querySelector("#rcp-msg").textContent = "Data refreshed.";
             });
+        }
+
+        _renderPlan(body) {
+            const here = planForTrack(this._planTrack);
+            const rows = TRACK_PLAN.map((p) => `
+                <tr class="${p === here ? "rcp-here" : ""}">
+                    <td>${escapeHtml(p.track)}</td>
+                    <td>${BUILD_SURFACE[p.build[0]].name}</td>
+                    <td>${escapeHtml(p.car)}</td>
+                    <td class="rcp-build">${p.build}</td>
+                </tr>`).join("");
+            const surfaces = Object.entries(BUILD_SURFACE)
+                .map(([code, sf]) => `<b>${code}</b> = ${sf.name}: ${sf.parts.join(", ")}, ${sf.gearbox}`)
+                .join("<br>");
+            const hereHtml = here
+                ? `<p>${escapeHtml(here.track)}: <b>${escapeHtml(here.car)}</b> <span class="rcp-build">${here.build}</span>
+                    — ${buildParts(here.build).map(escapeHtml).join(", ")}, and all base parts below.</p>`
+                : "";
+            body.innerHTML = `
+                ${hereHtml}
+                <table class="rcp-plan">
+                    <thead><tr><th>Track</th><th>Surface</th><th>Car</th><th>Build</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                <div class="rcp-legend">
+                    One car for each different car + build pair.<br><br>
+                    <b>Build code</b><br>
+                    ${surfaces}<br>
+                    <b>S</b> / <b>L</b> = gearbox ${BUILD_RATIO.S} / ${BUILD_RATIO.L}<br>
+                    <b>2</b> / <b>3</b> = ${BUILD_TURBO[2]} / ${BUILD_TURBO[3]}<br><br>
+                    <b>Base parts (all builds):</b> ${BASE_PARTS.map(escapeHtml).join(", ")}.
+                </div>
+                <div style="margin-top:12px"><button class="rcp-btn" id="rcp-plan-back">Back</button></div>`;
+            body.querySelector("#rcp-plan-back").addEventListener("click", () => this.open("settings"));
         }
     }
 
@@ -743,6 +860,7 @@
 
         const ui = new UI(data, page);
         ui.inject();
+        if (page) page.onInfo = (trackTitle) => ui.open("plan", trackTitle);
 
         const W = (typeof unsafeWindow !== "undefined") ? unsafeWindow : window;
         W.registerEugeneScript({
@@ -752,7 +870,7 @@
             colorDark: "#0f4526",
             hoverColor: "#2ecc71",
             iconSVG: RCP_ICON_SVG,
-            onClick: () => ui.toggle(true),
+            onClick: () => ui.open("settings"),
         });
         W.mountEugeneFooterMenu();
     }

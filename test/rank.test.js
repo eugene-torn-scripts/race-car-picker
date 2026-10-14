@@ -1,6 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { fastestByClass, fastestCar, formatLap, bestRowState } = require("../race-car-picker.user.js");
+const {
+    fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack,
+    TRACK_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
+} = require("../race-car-picker.user.js");
 
 function rec(model, lap, driver = "X") {
     return { model, name: `Model ${model}`, lap, driver };
@@ -94,4 +97,38 @@ test("bestRowState is unknown without a best record or a page car", () => {
     assert.equal(bestRowState(null, "Model 78"), "unknown");
     assert.equal(bestRowState(rec(519, 26.19), null), "unknown");
     assert.equal(bestRowState(rec(519, 26.19), ""), "unknown");
+});
+
+test("buildParts gives tarmac parts with a short paddle-shift gearbox and stage two turbo", () => {
+    assert.deepEqual(buildParts("TS2"), [
+        "Track Tires", "Adjustable Coilover Suspension", "Paddle Shift Gearbox (Short Ratio)", "Stage Two Turbo kit",
+    ]);
+});
+
+test("buildParts gives dirt parts with a long rally gearbox and stage three turbo", () => {
+    assert.deepEqual(buildParts("DL3"), [
+        "Rally Tires", "Group N Rally Suspension", "Rally Gearbox (Long Ratio)", "Stage Three Turbo Kit",
+    ]);
+});
+
+test("planForTrack finds a track by title, ignoring case and spaces", () => {
+    assert.equal(planForTrack(" two islands ").car, "Edomondo NSX");
+    assert.equal(planForTrack("Mudpit").car, "Colina Tanprice");
+});
+
+test("planForTrack returns null for an unknown or missing title", () => {
+    assert.equal(planForTrack("Nowhere"), null);
+    assert.equal(planForTrack(null), null);
+    assert.equal(planForTrack(""), null);
+});
+
+test("the track plan covers 16 different tracks with valid build codes", () => {
+    assert.equal(new Set(TRACK_PLAN.map((p) => p.track)).size, 16);
+    for (const p of TRACK_PLAN) {
+        const [surface, ratio, turbo] = p.build;
+        assert.equal(p.build.length, 3, p.track);
+        assert.ok(BUILD_SURFACE[surface], p.track);
+        assert.ok(BUILD_RATIO[ratio], p.track);
+        assert.ok(BUILD_TURBO[turbo], p.track);
+    }
 });
