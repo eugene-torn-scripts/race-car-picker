@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.1.0
+// @version      2.1.1
 // @description  Shows the fastest car model for the current race track, picked from the global lap records.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.1.0";
+    const VERSION = "2.1.1";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -832,7 +832,7 @@
                     <tbody>${rows}</tbody>
                 </table>
                 <div class="rcp-legend">
-                    One car for each different car + build pair.<br><br>
+                    6 cars cover all tracks. Before a race, change the build parts to match the track.<br><br>
                     <b>Build code</b><br>
                     ${surfaces}<br>
                     <b>S</b> / <b>L</b> = gearbox ${BUILD_RATIO.S} / ${BUILD_RATIO.L}<br>
