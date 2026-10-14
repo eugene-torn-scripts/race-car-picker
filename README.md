@@ -10,7 +10,10 @@ While a race is open, one row shows on the race page (in the **Current car** box
 - **Green** — your current car is already the fastest model.
 - **Amber** — another model is faster.
 
-The footer icon opens the **car plan** directly (once the API key is set). It starts with a **list of cars to buy, in priority order**. Cars you already own with the correct build are marked ✓ owned (read from `/user/enlistedcars` and the car parts). A part change deletes the old part, so each build is a separate car. The plan uses one NSX per surface (7 cars); the track table also shows the ideal build where it differs.
+The footer icon opens the **car plan** directly (once the API key is set). It starts with a **list of cars to buy, in priority order**. Cars you already own with the correct build are marked ✓ owned (read from `/user/enlistedcars` and the car parts). A part change deletes the old part, so each build is a separate car. A toggle switches between 2 plans:
+
+- **Recommended (7 cars)** — one NSX build per surface, so you need fewer cars.
+- **Ideal (11 cars)** — the best car and build for each track. Stormatti Casteon (Speedway, Uptown, Convict) is not purchasable, so it is marked as such, with a purchasable alternative in brackets (Veloria LFA, Mercia SLR).
 
 You can also click the **i** button in the row to open the **car plan**: a table with the car and build for every track. The row of the current track is highlighted, and the exact parts for its build are listed. The footer panel also has a **Car plan** button.
 

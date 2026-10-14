@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.2.0
+// @version      2.3.0
 // @description  Shows the fastest car model for the current race track, picked from the global lap records.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.2.0";
+    const VERSION = "2.3.0";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -43,34 +43,76 @@
     const CAR_CLASSES = ["A", "B", "C", "D", "E"];
     const KEY_RE = /^[A-Za-z0-9]{16}$/;
 
-    const TRACK_PLAN = [
-        { track: "Commerce", car: "Edomondo NSX", build: "TS3", ideal: "TS2" },
-        { track: "Sewage", car: "Edomondo NSX", build: "TS3", ideal: "TS2" },
-        { track: "Underdog", car: "Edomondo NSX", build: "TS3", ideal: "TS2" },
-        { track: "Industrial", car: "Edomondo NSX", build: "TS3" },
-        { track: "Meltdown", car: "Edomondo NSX", build: "TS3" },
-        { track: "Vector", car: "Edomondo NSX", build: "TS3" },
-        { track: "Hammerhead", car: "Edomondo NSX", build: "DS3", ideal: "DS2" },
-        { track: "Parkland", car: "Edomondo NSX", build: "DS3" },
-        { track: "Two Islands", car: "Edomondo NSX", build: "DS3", ideal: "DL3" },
-        { track: "Speedway", car: "Veloria LFA", build: "TL3" },
-        { track: "Uptown", car: "Veloria LFA", build: "TL3" },
-        { track: "Withdrawal", car: "Veloria LFA", build: "TL3" },
-        { track: "Stone Park", car: "Echo R8", build: "DS3" },
-        { track: "Mudpit", car: "Colina Tanprice", build: "DL3" },
-        { track: "Docks", car: "Volt GT", build: "TL3" },
-        { track: "Convict", car: "Mercia SLR", build: "TL3" },
-    ];
+    const NOT_PURCHASABLE = ["Stormatti Casteon"];
 
-    const PURCHASE_PLAN = [
-        { car: "Edomondo NSX", build: "TS3" },
-        { car: "Edomondo NSX", build: "DS3" },
-        { car: "Veloria LFA", build: "TL3" },
-        { car: "Colina Tanprice", build: "DL3" },
-        { car: "Echo R8", build: "DS3" },
-        { car: "Volt GT", build: "TL3" },
-        { car: "Mercia SLR", build: "TL3" },
-    ];
+    const PLANS = {
+        recommended: {
+            title: "Recommended",
+            note: "One NSX build per surface, so you need fewer cars.",
+            tracks: [
+                { track: "Commerce", car: "Edomondo NSX", build: "TS3" },
+                { track: "Sewage", car: "Edomondo NSX", build: "TS3" },
+                { track: "Underdog", car: "Edomondo NSX", build: "TS3" },
+                { track: "Industrial", car: "Edomondo NSX", build: "TS3" },
+                { track: "Meltdown", car: "Edomondo NSX", build: "TS3" },
+                { track: "Vector", car: "Edomondo NSX", build: "TS3" },
+                { track: "Hammerhead", car: "Edomondo NSX", build: "DS3" },
+                { track: "Parkland", car: "Edomondo NSX", build: "DS3" },
+                { track: "Two Islands", car: "Edomondo NSX", build: "DS3" },
+                { track: "Speedway", car: "Veloria LFA", build: "TL3" },
+                { track: "Uptown", car: "Veloria LFA", build: "TL3" },
+                { track: "Withdrawal", car: "Veloria LFA", build: "TL3" },
+                { track: "Stone Park", car: "Echo R8", build: "DS3" },
+                { track: "Mudpit", car: "Colina Tanprice", build: "DL3" },
+                { track: "Docks", car: "Volt GT", build: "TL3" },
+                { track: "Convict", car: "Mercia SLR", build: "TL3" },
+            ],
+            purchase: [
+                { car: "Edomondo NSX", build: "TS3" },
+                { car: "Edomondo NSX", build: "DS3" },
+                { car: "Veloria LFA", build: "TL3" },
+                { car: "Colina Tanprice", build: "DL3" },
+                { car: "Echo R8", build: "DS3" },
+                { car: "Volt GT", build: "TL3" },
+                { car: "Mercia SLR", build: "TL3" },
+            ],
+        },
+        ideal: {
+            title: "Ideal",
+            note: "The best car and build for each track.",
+            tracks: [
+                { track: "Commerce", car: "Edomondo NSX", build: "TS2" },
+                { track: "Sewage", car: "Edomondo NSX", build: "TS2" },
+                { track: "Underdog", car: "Edomondo NSX", build: "TS2" },
+                { track: "Industrial", car: "Edomondo NSX", build: "TS3" },
+                { track: "Meltdown", car: "Edomondo NSX", build: "TS3" },
+                { track: "Vector", car: "Edomondo NSX", build: "TS3" },
+                { track: "Hammerhead", car: "Edomondo NSX", build: "DS2" },
+                { track: "Parkland", car: "Edomondo NSX", build: "DS3" },
+                { track: "Two Islands", car: "Edomondo NSX", build: "DL3" },
+                { track: "Speedway", car: "Stormatti Casteon", build: "TL3", alt: "Veloria LFA" },
+                { track: "Uptown", car: "Stormatti Casteon", build: "TL3", alt: "Veloria LFA" },
+                { track: "Withdrawal", car: "Veloria LFA", build: "TL3" },
+                { track: "Stone Park", car: "Echo R8", build: "DS3" },
+                { track: "Mudpit", car: "Colina Tanprice", build: "DL3" },
+                { track: "Docks", car: "Volt GT", build: "TL3" },
+                { track: "Convict", car: "Stormatti Casteon", build: "TL3", alt: "Mercia SLR" },
+            ],
+            purchase: [
+                { car: "Edomondo NSX", build: "TS3" },
+                { car: "Edomondo NSX", build: "DS3" },
+                { car: "Veloria LFA", build: "TL3" },
+                { car: "Colina Tanprice", build: "DL3" },
+                { car: "Echo R8", build: "DS3" },
+                { car: "Volt GT", build: "TL3" },
+                { car: "Mercia SLR", build: "TL3" },
+                { car: "Edomondo NSX", build: "TS2" },
+                { car: "Edomondo NSX", build: "DS2" },
+                { car: "Edomondo NSX", build: "DL3" },
+                { car: "Stormatti Casteon", build: "TL3" },
+            ],
+        },
+    };
 
     const BUILD_PART_IDS = {
         surface: { 46: "T", 47: "D" },
@@ -114,6 +156,7 @@
         cachePrefix: "rcp_cache_",
         currentCar: "rcp_currentCar",
         lastRace: "rcp_lastRace",
+        planView: "rcp_planView",
     };
 
     const IS_PDA = typeof PDA_httpGet === "function";
@@ -341,9 +384,9 @@
         return [...s.parts, `${s.gearbox} (${BUILD_RATIO[ratio]})`, BUILD_TURBO[turbo]];
     }
 
-    function planForTrack(trackTitle) {
+    function planForTrack(plan, trackTitle) {
         const wanted = (trackTitle || "").trim().toLowerCase();
-        return TRACK_PLAN.find((p) => p.track.toLowerCase() === wanted) || null;
+        return plan.tracks.find((p) => p.track.toLowerCase() === wanted) || null;
     }
 
     function carBuild(car) {
@@ -356,20 +399,26 @@
         return code.surface && code.ratio && code.turbo ? code.surface + code.ratio + code.turbo : null;
     }
 
-    function purchaseList(cars) {
+    function purchaseList(cars, plan) {
         const free = [...(cars || [])];
-        return PURCHASE_PLAN.map((item) => {
+        return plan.purchase.map((item) => {
             const i = free.findIndex((c) => c.car_item_name === item.car && carBuild(c) === item.build);
             const owned = i >= 0 ? free.splice(i, 1)[0] : null;
-            const tracks = TRACK_PLAN.filter((p) => p.car === item.car && p.build === item.build).map((p) => p.track);
-            return { ...item, tracks, owned };
+            const tracksWhere = (match) => plan.tracks.filter((p) => match(p) && p.build === item.build).map((p) => p.track);
+            return {
+                ...item,
+                tracks: tracksWhere((p) => p.car === item.car),
+                altTracks: tracksWhere((p) => p.alt === item.car),
+                purchasable: !NOT_PURCHASABLE.includes(item.car),
+                owned,
+            };
         });
     }
 
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
             fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack, carBuild, purchaseList,
-            TRACK_PLAN, PURCHASE_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
+            PLANS, NOT_PURCHASABLE, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
         };
         return;
     }
@@ -739,6 +788,8 @@
 #rcp-panel .rcp-plan tr.rcp-owned td{color:#8fe08f}
 #rcp-panel .rcp-h{margin:4px 0 8px;font-size:13px;color:#fff}
 #rcp-panel .rcp-h ~ .rcp-h{margin-top:16px}
+#rcp-panel .rcp-toggle{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+#rcp-panel .rcp-dim{color:#888}
 .rcp-legend{margin-top:12px;font-size:12px;color:#bbb}
 .rcp-legend b{color:#ddd}
 `;
@@ -857,25 +908,41 @@
             });
         }
 
+        _planKey() {
+            const key = localStorage.getItem(LS.planView);
+            return PLANS[key] ? key : "recommended";
+        }
+
         _renderPlan(body) {
-            const here = planForTrack(this._planTrack);
-            const rows = TRACK_PLAN.map((p) => `
+            const planKey = this._planKey();
+            const plan = PLANS[planKey];
+            const here = planForTrack(plan, this._planTrack);
+            const carHtml = (p) => escapeHtml(p.car) + (NOT_PURCHASABLE.includes(p.car)
+                ? ` <span class="rcp-dim">(not purchasable${p.alt ? `; alt: ${escapeHtml(p.alt)}` : ""})</span>`
+                : "");
+            const rows = plan.tracks.map((p) => `
                 <tr class="${p === here ? "rcp-here" : ""}">
                     <td>${escapeHtml(p.track)}</td>
                     <td>${BUILD_SURFACE[p.build[0]].name}</td>
-                    <td>${escapeHtml(p.car)}</td>
-                    <td><span class="rcp-build">${p.build}</span>${p.ideal ? ` <span class="rcp-dim">(ideal ${p.ideal})</span>` : ""}</td>
+                    <td>${carHtml(p)}</td>
+                    <td class="rcp-build">${p.build}</td>
                 </tr>`).join("");
             const surfaces = Object.entries(BUILD_SURFACE)
                 .map(([code, sf]) => `<b>${code}</b> = ${sf.name}: ${sf.parts.join(", ")}, ${sf.gearbox}`)
                 .join("<br>");
             const hereHtml = here
-                ? `<p>${escapeHtml(here.track)}: <b>${escapeHtml(here.car)}</b> <span class="rcp-build">${here.build}</span>
+                ? `<p>${escapeHtml(here.track)}: <b>${carHtml(here)}</b> <span class="rcp-build">${here.build}</span>
                     — ${buildParts(here.build).map(escapeHtml).join(", ")}, and all base parts below.</p>`
                 : "";
+            const toggle = Object.entries(PLANS).map(([key, pl]) => `
+                <button class="rcp-btn ${key === planKey ? "rcp-primary" : ""}" data-plan="${key}">
+                    ${pl.title} (${pl.purchase.length} cars)
+                </button>`).join("");
             body.innerHTML = `
+                <div class="rcp-toggle">${toggle}</div>
+                <p class="rcp-dim">${plan.note}</p>
                 <h3 class="rcp-h">Cars to buy, in priority order</h3>
-                <div id="rcp-buy">${this._buyHtml(null)}</div>
+                <div id="rcp-buy">${this._buyHtml(null, plan)}</div>
                 <h3 class="rcp-h">Car for each track</h3>
                 ${hereHtml}
                 <table class="rcp-plan">
@@ -883,8 +950,7 @@
                     <tbody>${rows}</tbody>
                 </table>
                 <div class="rcp-legend">
-                    A part change deletes the old part, so each build is a separate car.
-                    "Ideal" is the best build for the track; the plan uses one NSX build per surface to need fewer cars.<br><br>
+                    A part change deletes the old part, so each build is a separate car.<br><br>
                     <b>Build code</b><br>
                     ${surfaces}<br>
                     <b>S</b> / <b>L</b> = gearbox ${BUILD_RATIO.S} / ${BUILD_RATIO.L}<br>
@@ -892,20 +958,31 @@
                     <b>Base parts (all builds):</b> ${BASE_PARTS.map(escapeHtml).join(", ")}.
                 </div>
                 <div style="margin-top:12px"><button class="rcp-btn" id="rcp-plan-back">Settings</button></div>`;
+            body.querySelectorAll("[data-plan]").forEach((btn) => btn.addEventListener("click", () => {
+                localStorage.setItem(LS.planView, btn.dataset.plan);
+                this.render();
+            }));
             body.querySelector("#rcp-plan-back").addEventListener("click", () => this.open("settings"));
             if (!this.api.key) return;
             this.data.cars()
-                .then((cars) => { body.querySelector("#rcp-buy").innerHTML = this._buyHtml(cars); })
+                .then((cars) => { body.querySelector("#rcp-buy").innerHTML = this._buyHtml(cars, plan); })
                 .catch((e) => { body.querySelector("#rcp-buy").insertAdjacentHTML("beforeend", `<div class="rcp-err">Cannot read your cars: ${escapeHtml(e.message)}</div>`); });
         }
 
-        _buyHtml(cars) {
-            const rows = purchaseList(cars || []).map((item, i) => `
+        _buyHtml(cars, plan) {
+            const status = (item) => item.owned ? "✓ owned"
+                : !item.purchasable ? "not purchasable"
+                : cars ? "buy" : "…";
+            const tracks = (item) => [
+                ...item.tracks.map(escapeHtml),
+                ...item.altTracks.map((t) => `<span class="rcp-dim">(${escapeHtml(t)} alt)</span>`),
+            ].join(", ");
+            const rows = purchaseList(cars || [], plan).map((item, i) => `
                 <tr class="${item.owned ? "rcp-owned" : ""}">
                     <td>${i + 1}</td>
                     <td>${escapeHtml(item.car)} <span class="rcp-build">${item.build}</span></td>
-                    <td>${item.tracks.map(escapeHtml).join(", ")}</td>
-                    <td>${item.owned ? "✓ owned" : cars ? "buy" : "…"}</td>
+                    <td>${tracks(item)}</td>
+                    <td>${status(item)}</td>
                 </tr>`).join("");
             return `<table class="rcp-plan">
                 <thead><tr><th>#</th><th>Car</th><th>Tracks</th><th></th></tr></thead>

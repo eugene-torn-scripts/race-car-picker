@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
     fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack, carBuild, purchaseList,
-    TRACK_PLAN, PURCHASE_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
+    PLANS, NOT_PURCHASABLE, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
 } = require("../race-car-picker.user.js");
 
 function rec(model, lap, driver = "X") {
@@ -111,27 +111,50 @@ test("buildParts gives dirt parts with a long rally gearbox and stage three turb
     ]);
 });
 
+const { recommended, ideal } = PLANS;
+
 test("planForTrack finds a track by title, ignoring case and spaces", () => {
-    assert.equal(planForTrack(" two islands ").car, "Edomondo NSX");
-    assert.equal(planForTrack("Mudpit").car, "Colina Tanprice");
+    assert.equal(planForTrack(recommended, " two islands ").build, "DS3");
+    assert.equal(planForTrack(ideal, "Two Islands").build, "DL3");
+    assert.equal(planForTrack(recommended, "Mudpit").car, "Colina Tanprice");
 });
 
 test("planForTrack returns null for an unknown or missing title", () => {
-    assert.equal(planForTrack("Nowhere"), null);
-    assert.equal(planForTrack(null), null);
-    assert.equal(planForTrack(""), null);
+    assert.equal(planForTrack(recommended, "Nowhere"), null);
+    assert.equal(planForTrack(recommended, null), null);
+    assert.equal(planForTrack(recommended, ""), null);
 });
 
-test("the track plan covers 16 different tracks with valid build codes", () => {
-    assert.equal(new Set(TRACK_PLAN.map((p) => p.track)).size, 16);
-    for (const p of TRACK_PLAN) {
-        const [surface, ratio, turbo] = p.build;
-        assert.equal(p.build.length, 3, p.track);
-        assert.ok(BUILD_SURFACE[surface], p.track);
-        assert.ok(BUILD_RATIO[ratio], p.track);
-        assert.ok(BUILD_TURBO[turbo], p.track);
-    }
-});
+for (const [name, plan] of Object.entries(PLANS)) {
+    test(`the ${name} plan covers 16 different tracks with valid build codes`, () => {
+        assert.equal(new Set(plan.tracks.map((p) => p.track)).size, 16);
+        for (const p of plan.tracks) {
+            const [surface, ratio, turbo] = p.build;
+            assert.equal(p.build.length, 3, p.track);
+            assert.ok(BUILD_SURFACE[surface], p.track);
+            assert.ok(BUILD_RATIO[ratio], p.track);
+            assert.ok(BUILD_TURBO[turbo], p.track);
+        }
+    });
+
+    test(`every track in the ${name} plan has its car build in the purchase list`, () => {
+        for (const p of plan.tracks) {
+            assert.ok(plan.purchase.some((i) => i.car === p.car && i.build === p.build), p.track);
+        }
+    });
+
+    test(`every purchase in the ${name} plan is used on a track, directly or as an alternative`, () => {
+        for (const item of purchaseList([], plan)) {
+            assert.ok(item.tracks.length + item.altTracks.length > 0, `${item.car} ${item.build}`);
+        }
+    });
+
+    test(`every not-purchasable car in the ${name} plan has a purchasable alternative`, () => {
+        for (const p of plan.tracks.filter((x) => NOT_PURCHASABLE.includes(x.car))) {
+            assert.ok(p.alt && !NOT_PURCHASABLE.includes(p.alt), p.track);
+        }
+    });
+}
 
 function ownCar(name, parts) {
     return { car_item_name: name, parts };
@@ -173,7 +196,7 @@ test("purchaseList marks a car as owned only when model and build match", () => 
     ];
 
     // When
-    const list = purchaseList(cars);
+    const list = purchaseList(cars, recommended);
 
     // Then
     assert.deepEqual(list.map((i) => [i.car, i.build, !!i.owned]), [
@@ -190,43 +213,45 @@ test("purchaseList marks a car as owned only when model and build match", () => 
 test("purchaseList matches 2 cars of the same model to 2 different builds", () => {
     const cars = [ownCar("Edomondo NSX", [47, 87, 99]), ownCar("Edomondo NSX", NSX_TS3_PARTS)];
 
-    const list = purchaseList(cars);
+    const list = purchaseList(cars, recommended);
 
     assert.equal(list[0].owned, cars[1]);
     assert.equal(list[1].owned, cars[0]);
 });
 
 test("purchaseList uses one owned car for one item only", () => {
-    const list = purchaseList([ownCar("Edomondo NSX", NSX_TS3_PARTS)]);
+    const list = purchaseList([ownCar("Edomondo NSX", NSX_TS3_PARTS)], recommended);
 
     assert.equal(list.filter((i) => i.owned).length, 1);
 });
 
 test("purchaseList shows nothing owned without cars", () => {
-    assert.equal(purchaseList(null).some((i) => i.owned), false);
-    assert.equal(purchaseList([]).some((i) => i.owned), false);
+    assert.equal(purchaseList(null, recommended).some((i) => i.owned), false);
+    assert.equal(purchaseList([], recommended).some((i) => i.owned), false);
 });
 
 test("purchaseList lists the tracks of each car build", () => {
-    const list = purchaseList([]);
+    const list = purchaseList([], recommended);
 
     assert.deepEqual(list[1].tracks, ["Hammerhead", "Parkland", "Two Islands"]);
     assert.deepEqual(list[3].tracks, ["Mudpit"]);
 });
 
-test("every track in the plan uses a car build from the purchase plan, and every purchase has a track", () => {
-    for (const p of TRACK_PLAN) {
-        assert.ok(PURCHASE_PLAN.some((i) => i.car === p.car && i.build === p.build), p.track);
-    }
-    for (const item of purchaseList([])) {
-        assert.ok(item.tracks.length > 0, `${item.car} ${item.build}`);
-    }
+test("purchaseList lists alternative tracks and marks a not-purchasable car", () => {
+    // Given
+    const list = purchaseList([], ideal);
+
+    // When
+    const mercia = list.find((i) => i.car === "Mercia SLR");
+    const stormatti = list.find((i) => i.car === "Stormatti Casteon");
+    const lfa = list.find((i) => i.car === "Veloria LFA");
+
+    // Then
+    assert.deepEqual([mercia.tracks, mercia.altTracks, mercia.purchasable], [[], ["Convict"], true]);
+    assert.deepEqual([stormatti.tracks, stormatti.purchasable], [["Speedway", "Uptown", "Convict"], false]);
+    assert.deepEqual([lfa.tracks, lfa.altTracks], [["Withdrawal"], ["Speedway", "Uptown"]]);
 });
 
-test("ideal builds in the plan are valid build codes that differ from the plan build", () => {
-    for (const p of TRACK_PLAN.filter((x) => x.ideal)) {
-        const [surface, ratio, turbo] = p.ideal;
-        assert.ok(BUILD_SURFACE[surface] && BUILD_RATIO[ratio] && BUILD_TURBO[turbo], p.track);
-        assert.notEqual(p.ideal, p.build, p.track);
-    }
+test("purchaseList has no alternative tracks in the recommended plan", () => {
+    assert.ok(purchaseList([], recommended).every((i) => i.altTracks.length === 0 && i.purchasable));
 });
