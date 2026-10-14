@@ -10,7 +10,9 @@ While a race is open, one row shows on the race page (in the **Current car** box
 - **Green** — your current car is already the fastest model.
 - **Amber** — another model is faster.
 
-Click the **i** button in the row to open the **car plan**: a table with the car and build for every track. The row of the current track is highlighted, and the exact parts for its build are listed. The footer panel also has a **Car plan** button.
+The footer icon opens the **car plan** directly (once the API key is set). It starts with a **list of cars to buy, in priority order**. Cars you already own with the correct build are marked ✓ owned (read from `/user/enlistedcars` and the car parts). A part change deletes the old part, so each build is a separate car. The plan uses one NSX per surface (7 cars); the track table also shows the ideal build where it differs.
+
+You can also click the **i** button in the row to open the **car plan**: a table with the car and build for every track. The row of the current track is highlighted, and the exact parts for its build are listed. The footer panel also has a **Car plan** button.
 
 Build codes (from the community guide in the Torn Racing Guide userscript):
 
@@ -43,6 +45,7 @@ All data comes from the Torn API v2:
 | `/racing/{raceId}/race` | track and race limits | 1 min |
 | `/user/races` | your open race (when the page has no race id) | 1 min |
 | `/racing/tracks` | track names | 7 days |
+| `/user/enlistedcars` | your cars and parts (owned check) | 5 min |
 
 A **Minimal Access** key is enough. The key is stored only in your browser and is sent only to `api.torn.com`.
 

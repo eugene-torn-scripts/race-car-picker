@@ -1,8 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-    fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack,
-    TRACK_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
+    fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack, carBuild, purchaseList,
+    TRACK_PLAN, PURCHASE_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
 } = require("../race-car-picker.user.js");
 
 function rec(model, lap, driver = "X") {
@@ -130,5 +130,103 @@ test("the track plan covers 16 different tracks with valid build codes", () => {
         assert.ok(BUILD_SURFACE[surface], p.track);
         assert.ok(BUILD_RATIO[ratio], p.track);
         assert.ok(BUILD_TURBO[turbo], p.track);
+    }
+});
+
+function ownCar(name, parts) {
+    return { car_item_name: name, parts };
+}
+
+const NSX_TS3_PARTS = [88, 99, 93, 85, 46, 1];
+const NSX_DL2_PARTS = [47, 94, 86, 81];
+
+test("carBuild decodes a tarmac short stage three build", () => {
+    assert.equal(carBuild(ownCar("Edomondo NSX", NSX_TS3_PARTS)), "TS3");
+});
+
+test("carBuild decodes a dirt long stage two build", () => {
+    assert.equal(carBuild(ownCar("Edomondo NSX", NSX_DL2_PARTS)), "DL2");
+});
+
+test("carBuild decodes the short rally gearbox and the long paddle-shift gearbox", () => {
+    assert.equal(carBuild(ownCar("X", [47, 87, 99])), "DS3");
+    assert.equal(carBuild(ownCar("X", [46, 84, 99])), "TL3");
+});
+
+test("carBuild returns null when a build part is missing", () => {
+    assert.equal(carBuild(ownCar("X", [46, 85])), null);
+    assert.equal(carBuild(ownCar("X", [46, 99])), null);
+    assert.equal(carBuild(ownCar("X", [85, 99])), null);
+});
+
+test("carBuild returns null for a car without parts", () => {
+    assert.equal(carBuild(ownCar("X", [])), null);
+    assert.equal(carBuild(ownCar("X", undefined)), null);
+});
+
+test("purchaseList marks a car as owned only when model and build match", () => {
+    // Given
+    const cars = [
+        ownCar("Edomondo NSX", NSX_TS3_PARTS),
+        ownCar("Veloria LFA", [47, 87, 99]),
+        ownCar("Volt GT", []),
+    ];
+
+    // When
+    const list = purchaseList(cars);
+
+    // Then
+    assert.deepEqual(list.map((i) => [i.car, i.build, !!i.owned]), [
+        ["Edomondo NSX", "TS3", true],
+        ["Edomondo NSX", "DS3", false],
+        ["Veloria LFA", "TL3", false],
+        ["Colina Tanprice", "DL3", false],
+        ["Echo R8", "DS3", false],
+        ["Volt GT", "TL3", false],
+        ["Mercia SLR", "TL3", false],
+    ]);
+});
+
+test("purchaseList matches 2 cars of the same model to 2 different builds", () => {
+    const cars = [ownCar("Edomondo NSX", [47, 87, 99]), ownCar("Edomondo NSX", NSX_TS3_PARTS)];
+
+    const list = purchaseList(cars);
+
+    assert.equal(list[0].owned, cars[1]);
+    assert.equal(list[1].owned, cars[0]);
+});
+
+test("purchaseList uses one owned car for one item only", () => {
+    const list = purchaseList([ownCar("Edomondo NSX", NSX_TS3_PARTS)]);
+
+    assert.equal(list.filter((i) => i.owned).length, 1);
+});
+
+test("purchaseList shows nothing owned without cars", () => {
+    assert.equal(purchaseList(null).some((i) => i.owned), false);
+    assert.equal(purchaseList([]).some((i) => i.owned), false);
+});
+
+test("purchaseList lists the tracks of each car build", () => {
+    const list = purchaseList([]);
+
+    assert.deepEqual(list[1].tracks, ["Hammerhead", "Parkland", "Two Islands"]);
+    assert.deepEqual(list[3].tracks, ["Mudpit"]);
+});
+
+test("every track in the plan uses a car build from the purchase plan, and every purchase has a track", () => {
+    for (const p of TRACK_PLAN) {
+        assert.ok(PURCHASE_PLAN.some((i) => i.car === p.car && i.build === p.build), p.track);
+    }
+    for (const item of purchaseList([])) {
+        assert.ok(item.tracks.length > 0, `${item.car} ${item.build}`);
+    }
+});
+
+test("ideal builds in the plan are valid build codes that differ from the plan build", () => {
+    for (const p of TRACK_PLAN.filter((x) => x.ideal)) {
+        const [surface, ratio, turbo] = p.ideal;
+        assert.ok(BUILD_SURFACE[surface] && BUILD_RATIO[ratio] && BUILD_TURBO[turbo], p.track);
+        assert.notEqual(p.ideal, p.build, p.track);
     }
 });

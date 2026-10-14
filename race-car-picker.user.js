@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.1.2
+// @version      2.2.0
 // @description  Shows the fastest car model for the current race track, picked from the global lap records.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.1.2";
+    const VERSION = "2.2.0";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -44,15 +44,15 @@
     const KEY_RE = /^[A-Za-z0-9]{16}$/;
 
     const TRACK_PLAN = [
-        { track: "Commerce", car: "Edomondo NSX", build: "TS2" },
-        { track: "Sewage", car: "Edomondo NSX", build: "TS2" },
-        { track: "Underdog", car: "Edomondo NSX", build: "TS2" },
+        { track: "Commerce", car: "Edomondo NSX", build: "TS3", ideal: "TS2" },
+        { track: "Sewage", car: "Edomondo NSX", build: "TS3", ideal: "TS2" },
+        { track: "Underdog", car: "Edomondo NSX", build: "TS3", ideal: "TS2" },
         { track: "Industrial", car: "Edomondo NSX", build: "TS3" },
         { track: "Meltdown", car: "Edomondo NSX", build: "TS3" },
         { track: "Vector", car: "Edomondo NSX", build: "TS3" },
-        { track: "Hammerhead", car: "Edomondo NSX", build: "DS2" },
+        { track: "Hammerhead", car: "Edomondo NSX", build: "DS3", ideal: "DS2" },
         { track: "Parkland", car: "Edomondo NSX", build: "DS3" },
-        { track: "Two Islands", car: "Edomondo NSX", build: "DL3" },
+        { track: "Two Islands", car: "Edomondo NSX", build: "DS3", ideal: "DL3" },
         { track: "Speedway", car: "Veloria LFA", build: "TL3" },
         { track: "Uptown", car: "Veloria LFA", build: "TL3" },
         { track: "Withdrawal", car: "Veloria LFA", build: "TL3" },
@@ -61,6 +61,22 @@
         { track: "Docks", car: "Volt GT", build: "TL3" },
         { track: "Convict", car: "Mercia SLR", build: "TL3" },
     ];
+
+    const PURCHASE_PLAN = [
+        { car: "Edomondo NSX", build: "TS3" },
+        { car: "Edomondo NSX", build: "DS3" },
+        { car: "Veloria LFA", build: "TL3" },
+        { car: "Colina Tanprice", build: "DL3" },
+        { car: "Echo R8", build: "DS3" },
+        { car: "Volt GT", build: "TL3" },
+        { car: "Mercia SLR", build: "TL3" },
+    ];
+
+    const BUILD_PART_IDS = {
+        surface: { 46: "T", 47: "D" },
+        ratio: { 84: "L", 85: "S", 86: "L", 87: "S" },
+        turbo: { 81: "2", 99: "3" },
+    };
 
     const BUILD_SURFACE = {
         T: { name: "Tarmac", parts: ["Track Tires", "Adjustable Coilover Suspension"], gearbox: "Paddle Shift Gearbox" },
@@ -88,6 +104,7 @@
         tracks: 7 * 24 * 3600_000,
         records: 12 * 3600_000,
         race: 60_000,
+        cars: 5 * 60_000,
         activeRace: 60_000,
         lastRace: 6 * 3600_000,
     };
@@ -256,6 +273,13 @@
             return tracks.find((t) => t.title.toLowerCase() === wanted) || null;
         }
 
+        cars() {
+            return this._cached("cars", TTL.cars, async () => {
+                const d = await this.api.get("/user/enlistedcars");
+                return (d.enlistedcars || []).filter((c) => !c.is_removed);
+            });
+        }
+
         trackRecords(trackId) {
             return this._cached(`records_${trackId}`, TTL.records, async () => {
                 const byClass = {};
@@ -322,10 +346,30 @@
         return TRACK_PLAN.find((p) => p.track.toLowerCase() === wanted) || null;
     }
 
+    function carBuild(car) {
+        const code = { surface: null, ratio: null, turbo: null };
+        for (const id of car.parts || []) {
+            for (const slot of Object.keys(code)) {
+                if (BUILD_PART_IDS[slot][id]) code[slot] = BUILD_PART_IDS[slot][id];
+            }
+        }
+        return code.surface && code.ratio && code.turbo ? code.surface + code.ratio + code.turbo : null;
+    }
+
+    function purchaseList(cars) {
+        const free = [...(cars || [])];
+        return PURCHASE_PLAN.map((item) => {
+            const i = free.findIndex((c) => c.car_item_name === item.car && carBuild(c) === item.build);
+            const owned = i >= 0 ? free.splice(i, 1)[0] : null;
+            const tracks = TRACK_PLAN.filter((p) => p.car === item.car && p.build === item.build).map((p) => p.track);
+            return { ...item, tracks, owned };
+        });
+    }
+
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
-            fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack,
-            TRACK_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
+            fastestByClass, fastestCar, formatLap, bestRowState, buildParts, planForTrack, carBuild, purchaseList,
+            TRACK_PLAN, PURCHASE_PLAN, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
         };
         return;
     }
@@ -691,6 +735,10 @@
 #rcp-panel .rcp-plan th{color:#999;font-weight:600}
 #rcp-panel .rcp-plan tr.rcp-here td{background:#16301c;color:#fff}
 #rcp-panel .rcp-plan .rcp-build{font-family:ui-monospace,Menlo,monospace;color:#e6c27a}
+#rcp-panel .rcp-plan .rcp-dim{color:#888}
+#rcp-panel .rcp-plan tr.rcp-owned td{color:#8fe08f}
+#rcp-panel .rcp-h{margin:4px 0 8px;font-size:13px;color:#fff}
+#rcp-panel .rcp-h ~ .rcp-h{margin-top:16px}
 .rcp-legend{margin-top:12px;font-size:12px;color:#bbb}
 .rcp-legend b{color:#ddd}
 `;
@@ -757,7 +805,7 @@
             body.innerHTML = `
                 <div class="rcp-auth">
                     <h3>Connect your Torn account</h3>
-                    <p>Paste an API key to read the track lap records.</p>
+                    <p>Paste an API key to read the track lap records and your enlisted cars.</p>
                     <input type="text" id="rcp-key" maxlength="20" placeholder="16-character API key"
                            autocomplete="off" spellcheck="false">
                     <div class="rcp-err" id="rcp-key-err"></div>
@@ -775,7 +823,7 @@
                     KeyResolver.save(input.value);
                     this.api.setKey(KeyResolver.resolve());
                     err.textContent = "";
-                    this.render();
+                    this.open("plan");
                     this.page?.rescan();
                 } catch (ex) { err.textContent = ex.message; }
             };
@@ -816,7 +864,7 @@
                     <td>${escapeHtml(p.track)}</td>
                     <td>${BUILD_SURFACE[p.build[0]].name}</td>
                     <td>${escapeHtml(p.car)}</td>
-                    <td class="rcp-build">${p.build}</td>
+                    <td><span class="rcp-build">${p.build}</span>${p.ideal ? ` <span class="rcp-dim">(ideal ${p.ideal})</span>` : ""}</td>
                 </tr>`).join("");
             const surfaces = Object.entries(BUILD_SURFACE)
                 .map(([code, sf]) => `<b>${code}</b> = ${sf.name}: ${sf.parts.join(", ")}, ${sf.gearbox}`)
@@ -826,21 +874,43 @@
                     — ${buildParts(here.build).map(escapeHtml).join(", ")}, and all base parts below.</p>`
                 : "";
             body.innerHTML = `
+                <h3 class="rcp-h">Cars to buy, in priority order</h3>
+                <div id="rcp-buy">${this._buyHtml(null)}</div>
+                <h3 class="rcp-h">Car for each track</h3>
                 ${hereHtml}
                 <table class="rcp-plan">
                     <thead><tr><th>Track</th><th>Surface</th><th>Car</th><th>Build</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
                 <div class="rcp-legend">
-                    6 cars cover all tracks. Before a race, change the build parts to match the track.<br><br>
+                    A part change deletes the old part, so each build is a separate car.
+                    "Ideal" is the best build for the track; the plan uses one NSX build per surface to need fewer cars.<br><br>
                     <b>Build code</b><br>
                     ${surfaces}<br>
                     <b>S</b> / <b>L</b> = gearbox ${BUILD_RATIO.S} / ${BUILD_RATIO.L}<br>
                     <b>2</b> / <b>3</b> = ${BUILD_TURBO[2]} / ${BUILD_TURBO[3]}<br><br>
                     <b>Base parts (all builds):</b> ${BASE_PARTS.map(escapeHtml).join(", ")}.
                 </div>
-                <div style="margin-top:12px"><button class="rcp-btn" id="rcp-plan-back">Back</button></div>`;
+                <div style="margin-top:12px"><button class="rcp-btn" id="rcp-plan-back">Settings</button></div>`;
             body.querySelector("#rcp-plan-back").addEventListener("click", () => this.open("settings"));
+            if (!this.api.key) return;
+            this.data.cars()
+                .then((cars) => { body.querySelector("#rcp-buy").innerHTML = this._buyHtml(cars); })
+                .catch((e) => { body.querySelector("#rcp-buy").insertAdjacentHTML("beforeend", `<div class="rcp-err">Cannot read your cars: ${escapeHtml(e.message)}</div>`); });
+        }
+
+        _buyHtml(cars) {
+            const rows = purchaseList(cars || []).map((item, i) => `
+                <tr class="${item.owned ? "rcp-owned" : ""}">
+                    <td>${i + 1}</td>
+                    <td>${escapeHtml(item.car)} <span class="rcp-build">${item.build}</span></td>
+                    <td>${item.tracks.map(escapeHtml).join(", ")}</td>
+                    <td>${item.owned ? "✓ owned" : cars ? "buy" : "…"}</td>
+                </tr>`).join("");
+            return `<table class="rcp-plan">
+                <thead><tr><th>#</th><th>Car</th><th>Tracks</th><th></th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
         }
     }
 
@@ -870,7 +940,7 @@
             colorDark: "#0f4526",
             hoverColor: "#2ecc71",
             iconSVG: RCP_ICON_SVG,
-            onClick: () => ui.open("settings"),
+            onClick: () => ui.open(api.key ? "plan" : "settings"),
         });
         W.mountEugeneFooterMenu();
     }
