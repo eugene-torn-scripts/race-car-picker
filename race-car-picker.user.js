@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.1.1
+// @version      2.1.2
 // @description  Shows the fastest car model for the current race track, picked from the global lap records.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.1.1";
+    const VERSION = "2.1.2";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -686,11 +686,11 @@
 .rcp-err{color:#e08f8f;min-height:16px;font-size:12px}
 .rcp-note{color:#888;font-size:11px;margin-top:12px;text-align:left;background:#141414;border:1px solid #2a2a2a;border-radius:4px;padding:10px}
 .rcp-msg{color:#8fe08f;font-size:12px;min-height:16px;margin-top:8px}
-.rcp-plan{width:100%;border-collapse:collapse;font-size:12px}
-.rcp-plan th,.rcp-plan td{text-align:left;padding:5px 8px;border-bottom:1px solid #2a2a2a}
-.rcp-plan th{color:#999;font-weight:600}
-.rcp-plan tr.rcp-here td{background:#16301c;color:#fff}
-.rcp-plan .rcp-build{font-family:ui-monospace,Menlo,monospace;color:#e6c27a}
+#rcp-panel .rcp-plan{width:100%;border-collapse:collapse;font-size:12px}
+#rcp-panel .rcp-plan th,#rcp-panel .rcp-plan td{text-align:left;padding:5px 8px;border-bottom:1px solid #2a2a2a;color:#ddd;background:transparent}
+#rcp-panel .rcp-plan th{color:#999;font-weight:600}
+#rcp-panel .rcp-plan tr.rcp-here td{background:#16301c;color:#fff}
+#rcp-panel .rcp-plan .rcp-build{font-family:ui-monospace,Menlo,monospace;color:#e6c27a}
 .rcp-legend{margin-top:12px;font-size:12px;color:#bbb}
 .rcp-legend b{color:#ddd}
 `;
