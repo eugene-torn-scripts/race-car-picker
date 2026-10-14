@@ -1,13 +1,14 @@
 # Torn Race Car Picker
 
-A [Torn City](https://www.torn.com) userscript that shows the **best of your enlisted cars for the track of your current race**.
+A [Torn City](https://www.torn.com) userscript that shows the **fastest car model for the track of your current race**.
 
 While a race is open, one row shows on the race page (in the **Current car** box) and on the **Change Car** page:
 
-> Best car for Docks: **Edomondo NSX** · est. lap 02:42.84 (your lap, scaled to records) — ✓ you use it
+> Fastest car for Speedway: **Stormatti Casteon** (class A) · lap 00:26.19 (record by ToxicMonkeyMZC) — change to it
+> Per class — A: Stormatti Casteon 00:26.19 · B: Bavaria M5 00:27.50 · C: Oceania SS 00:28.81 · D: Tabata RM2 00:30.31 · E: Stålhög 860 00:32.14
 
-- **Green** — your current car is already the best model for the track.
-- **Amber** — another of your cars is better: change to it.
+- **Green** — your current car is already the fastest model.
+- **Amber** — another model is faster.
 
 When the race has started, the row is hidden (you can no longer change car). The footer menu opens a small panel for the API key.
 
@@ -15,17 +16,11 @@ Works on desktop browsers (Tampermonkey / Violentmonkey) and inside **Torn PDA**
 
 ---
 
-## How the best car is picked
+## How the fastest car is picked
 
-For each of your enlisted cars, the script finds an estimated lap time on the track:
+The script reads the track's global top-5 lap records for each class (A–E). The model with the best lap wins. The row also shows the fastest model in each class, so you can pick a car you own.
 
-1. **Global record.** If the car's model is in the track's top-5 lap records for any class, the record lap is used. This compares car models at their best. So a model that is faster on this track wins, even if you never raced it there.
-2. **Your own lap.** If the model has no record, your own best lap with that model is used. It is scaled by how much slower your laps are than the records, on the same track or on other tracks.
-3. **No data.** Cars without any lap data rank last, by class.
-
-The lowest estimate wins. Two cars of the same model are split by points spent, then by total stats.
-
-Race limits are respected: car class, car model, and stock car only.
+If the race has a car class limit or a car model limit, only records that match the limit are used.
 
 ## Data used
 
@@ -33,10 +28,9 @@ All data comes from the Torn API v2:
 
 | Endpoint | Used for | Cache |
 |---|---|---|
-| `/user/enlistedcars` | your cars | 5 min |
-| `/user/racingrecords` | your best laps per track and model | 15 min |
 | `/racing/{trackId}/records?cat=A..E` | top-5 laps per class | 12 h |
 | `/racing/{raceId}/race` | track and race limits | 1 min |
+| `/user/races` | your open race (when the page has no race id) | 1 min |
 | `/racing/tracks` | track names | 7 days |
 
 A **Minimal Access** key is enough. The key is stored only in your browser and is sent only to `api.torn.com`.

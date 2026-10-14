@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      1.1.0
-// @description  Shows the best of your enlisted cars for the current race track, picked from global lap records and your own lap times.
+// @version      2.0.0
+// @description  Shows the fastest car model for the current race track, picked from the global lap records.
 // @author       lannav
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -33,22 +33,19 @@
 (function () {
     "use strict";
 
-    const VERSION = "1.1.0";
+    const VERSION = "2.0.0";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
     const PDA_TIMEOUT_MS = 20_000;
     const RATE_LIMIT_COOLDOWN_MS = 60_000;
     const RATE_LIMIT_ERROR_CODE = 5;
-    const RECORDS_PER_CLASS = 5;
     const CAR_CLASSES = ["A", "B", "C", "D", "E"];
     const KEY_RE = /^[A-Za-z0-9]{16}$/;
 
     const TTL = {
         tracks: 7 * 24 * 3600_000,
         records: 12 * 3600_000,
-        cars: 5 * 60_000,
-        ownLaps: 15 * 60_000,
         race: 60_000,
         activeRace: 60_000,
         lastRace: 6 * 3600_000,
@@ -76,13 +73,6 @@
         const m = Math.floor(seconds / 60);
         const s = seconds - m * 60;
         return `${String(m).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
-    }
-
-    function median(values) {
-        if (!values.length) return null;
-        const sorted = [...values].sort((a, b) => a - b);
-        const mid = Math.floor(sorted.length / 2);
-        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     }
 
     function readJson(key) {
@@ -225,28 +215,6 @@
             return tracks.find((t) => t.title.toLowerCase() === wanted) || null;
         }
 
-        cars() {
-            return this._cached("cars", TTL.cars, async () => {
-                const d = await this.api.get("/user/enlistedcars");
-                return (d.enlistedcars || []).filter((c) => !c.is_removed);
-            });
-        }
-
-        ownLaps() {
-            return this._cached("ownLaps", TTL.ownLaps, async () => {
-                const d = await this.api.get("/user/racingrecords");
-                const byTrack = {};
-                for (const t of d.racingrecords || []) {
-                    byTrack[t.track.id] = (t.records || []).map((r) => ({
-                        model: r.car_id,
-                        name: r.car_name,
-                        lap: r.lap_time / 100,
-                    }));
-                }
-                return byTrack;
-            });
-        }
-
         trackRecords(trackId) {
             return this._cached(`records_${trackId}`, TTL.records, async () => {
                 const byClass = {};
@@ -263,17 +231,13 @@
             });
         }
 
-        cachedTrackRecords() {
-            const out = {};
-            for (const name of Cache.names()) {
-                const m = /^records_(\d+)$/.exec(name);
-                if (m) out[m[1]] = Cache.peek(name);
-            }
-            return out;
-        }
-
         race(raceId) {
             return this._cached(`race_${raceId}`, TTL.race, async () => (await this.api.get(`/racing/${raceId}/race`)).race);
+        }
+
+        async fastestForTrack(trackId, requirements) {
+            const byClass = fastestByClass(await this.trackRecords(trackId), requirements);
+            return { best: fastestCar(byClass), byClass };
         }
 
         activeRace() {
@@ -282,130 +246,32 @@
                 return (d.races || []).find((r) => r.status !== "finished") || null;
             });
         }
+    }
 
-        async rankForTrack(trackId, requirements) {
-            const [cars, ownLaps, records] = await Promise.all([
-                this.cars(), this.ownLaps(), this.trackRecords(trackId),
-            ]);
-            const calibration = Object.entries(this.cachedTrackRecords())
-                .filter(([id]) => Number(id) !== Number(trackId))
-                .map(([id, recs]) => ({ records: recs, own: ownLaps[id] || [] }));
-            return rankCars({
-                cars,
-                records,
-                own: ownLaps[trackId] || [],
-                calibration,
-                requirements,
-            });
+    function fastestByClass(records, requirements) {
+        const out = [];
+        for (const cls of CAR_CLASSES) {
+            if (requirements?.car_class && cls !== requirements.car_class) continue;
+            const list = (records?.[cls] || [])
+                .filter((r) => !requirements?.car_item_id || r.model === requirements.car_item_id);
+            if (!list.length) continue;
+            const top = list.reduce((a, b) => (b.lap < a.lap ? b : a));
+            out.push({ ...top, cls });
         }
+        return out;
     }
 
-    function bestRecordByModel(records) {
-        const best = new Map();
-        for (const list of Object.values(records || {})) {
-            for (const r of list || []) {
-                const prev = best.get(r.model);
-                if (!prev || r.lap < prev.lap) best.set(r.model, r);
-            }
-        }
-        return best;
-    }
-
-    function classFloors(records) {
-        const floors = {};
-        for (const [cls, list] of Object.entries(records || {})) {
-            if ((list || []).length >= RECORDS_PER_CLASS) floors[cls] = Math.max(...list.map((r) => r.lap));
-        }
-        return floors;
-    }
-
-    function bestOwnByModel(own) {
-        const best = new Map();
-        for (const r of own || []) {
-            const prev = best.get(r.model);
-            if (prev == null || r.lap < prev) best.set(r.model, r.lap);
-        }
-        return best;
-    }
-
-    function ownToRecordRatios(records, own) {
-        const recordBest = bestRecordByModel(records);
-        const ratios = [];
-        for (const [model, lap] of bestOwnByModel(own)) {
-            const rec = recordBest.get(model);
-            if (rec) ratios.push(lap / rec.lap);
-        }
-        return ratios;
-    }
-
-    function isEligible(car, req) {
-        if (!req) return true;
-        if (req.car_class && car.class !== req.car_class) return false;
-        if (req.car_item_id && car.car_item_id !== req.car_item_id) return false;
-        if (req.requires_stock_car && (car.parts || []).length > 0) return false;
-        return true;
-    }
-
-    function statSum(car) {
-        return (car.top_speed || 0) + (car.acceleration || 0) + (car.braking || 0)
-            + (car.handling || 0) + (car.safety || 0) + (car.dirt || 0) + (car.tarmac || 0);
-    }
-
-    function rankCars({ cars, records, own, calibration, requirements }) {
-        const recordBest = bestRecordByModel(records);
-        const floors = classFloors(records);
-        const ownBest = bestOwnByModel(own);
-
-        let ratios = ownToRecordRatios(records, own);
-        if (!ratios.length) ratios = (calibration || []).flatMap((c) => ownToRecordRatios(c.records, c.own));
-        const ratio = median(ratios);
-
-        const rows = cars.map((car) => {
-            const record = recordBest.get(car.car_item_id) || null;
-            const ownLap = ownBest.has(car.car_item_id) ? ownBest.get(car.car_item_id) : null;
-            const floor = floors[car.class] ?? null;
-            let est = null;
-            let source = "none";
-            if (record) {
-                est = record.lap;
-                source = "record";
-            } else if (ownLap != null) {
-                est = ratio ? ownLap / ratio : ownLap;
-                source = ratio ? "own-calibrated" : "own";
-                if (floor != null && est < floor) est = floor;
-            }
-            return { car, eligible: isEligible(car, requirements), est, source, ownLap, record, floor };
-        });
-
-        rows.sort((a, b) => {
-            if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
-            if ((a.est == null) !== (b.est == null)) return a.est == null ? 1 : -1;
-            if (a.est != null && a.est !== b.est) return a.est - b.est;
-            if (a.est == null && a.car.class !== b.car.class) return a.car.class < b.car.class ? -1 : 1;
-            if ((b.car.points_spent || 0) !== (a.car.points_spent || 0)) return (b.car.points_spent || 0) - (a.car.points_spent || 0);
-            return statSum(b.car) - statSum(a.car);
-        });
-
-        const best = rows.find((r) => r.eligible && r.est != null) || rows.find((r) => r.eligible) || null;
-        return { rows, best, ratio, recordBest };
+    function fastestCar(byClass) {
+        return byClass.reduce((a, b) => (!a || b.lap < a.lap ? b : a), null);
     }
 
     function bestRowState(best, currentModelName) {
         if (!best || !currentModelName) return "unknown";
-        return best.car.car_item_name === currentModelName.trim() ? "current" : "change";
-    }
-
-    function sourceLabel(row) {
-        switch (row.source) {
-            case "record": return `global record (${row.record.driver})`;
-            case "own-calibrated": return "your lap, scaled to records";
-            case "own": return "your lap";
-            default: return "no lap data";
-        }
+        return best.name === currentModelName.trim() ? "current" : "change";
     }
 
     if (typeof module !== "undefined" && module.exports) {
-        module.exports = { rankCars, isEligible, formatLap, median, bestRowState };
+        module.exports = { fastestByClass, fastestCar, formatLap, bestRowState };
         return;
     }
 
@@ -609,19 +475,20 @@
         document.head.appendChild(s);
     }
 
-    function carDisplayName(car) {
-        return car.car_name ? `${car.car_name} (${car.car_item_name})` : car.car_item_name;
-    }
-
-    function bestRowHtml(trackTitle, best, state) {
-        const lap = best.est != null
-            ? ` · est. lap <b>${formatLap(best.est)}</b> <span class="rcp-dim">(${escapeHtml(sourceLabel(best))})</span>`
-            : ` <span class="rcp-dim">(no lap data, picked by class)</span>`;
+    function bestRowHtml(trackTitle, best, byClass, state) {
         const verdict = state === "current" ? "✓ you use it"
             : state === "change" ? "change to it"
             : "";
-        return `Best car for ${escapeHtml(trackTitle)}: <b>${escapeHtml(carDisplayName(best.car))}</b>${lap}`
+        let html = `Fastest car for ${escapeHtml(trackTitle)}: <b>${escapeHtml(best.name)}</b> (class ${best.cls})`
+            + ` · lap <b>${formatLap(best.lap)}</b> <span class="rcp-dim">(record by ${escapeHtml(best.driver)})</span>`
             + (verdict ? ` — <span class="rcp-verdict">${verdict}</span>` : "");
+        if (byClass.length > 1) {
+            const perClass = byClass
+                .map((r) => `${r.cls}: ${escapeHtml(r.name)} ${formatLap(r.lap)}`)
+                .join(" · ");
+            html += `<br><span class="rcp-dim">Per class — ${perClass}</span>`;
+        }
+        return html;
     }
 
     class RacingPage {
@@ -692,15 +559,15 @@
                 raceId: race.id, trackId: race.track_id, requirements: race.requirements, ts: Date.now(),
             });
 
-            const [{ best }, tracks] = await Promise.all([
-                this.data.rankForTrack(race.track_id, race.requirements),
+            const [{ best, byClass }, tracks] = await Promise.all([
+                this.data.fastestForTrack(race.track_id, race.requirements),
                 this.data.tracks(),
             ]);
             if (!best || carBox.querySelector(".rcp-row")) return;
             const trackTitle = tracks.find((t) => t.id === race.track_id)?.title || "this track";
             const currentModel = carBox.querySelector(".model-wrap .img[title]")?.getAttribute("title");
             const state = bestRowState(best, currentModel);
-            this._showRow(carBox, "beforeend", bestRowHtml(trackTitle, best, state), state);
+            this._showRow(carBox, "beforeend", bestRowHtml(trackTitle, best, byClass, state), state);
         }
 
         _currentRaceBlock(wrap) {
@@ -725,13 +592,13 @@
             if (!track) return;
 
             const requirements = await this._requirementsFor(track.id);
-            const { best } = await this.data.rankForTrack(track.id, requirements);
+            const { best, byClass } = await this.data.fastestForTrack(track.id, requirements);
             if (!best || wrap.querySelector(".rcp-row")) return;
 
             const currentLi = [...list.querySelectorAll(":scope > li")].find((li) => li.querySelector(".icon-in-race"));
             const currentModel = currentLi?.querySelector(".model .bold")?.textContent.trim();
             const state = bestRowState(best, currentModel);
-            this._showRow(block || list, block ? "afterend" : "beforebegin", bestRowHtml(track.title, best, state), state);
+            this._showRow(block || list, block ? "afterend" : "beforebegin", bestRowHtml(track.title, best, byClass, state), state);
         }
     }
 
@@ -809,7 +676,7 @@
             body.innerHTML = `
                 <div class="rcp-auth">
                     <h3>Connect your Torn account</h3>
-                    <p>Paste an API key to read your enlisted cars and lap records.</p>
+                    <p>Paste an API key to read the track lap records.</p>
                     <input type="text" id="rcp-key" maxlength="20" placeholder="16-character API key"
                            autocomplete="off" spellcheck="false">
                     <div class="rcp-err" id="rcp-key-err"></div>
@@ -845,15 +712,9 @@
                 <div class="rcp-msg" id="rcp-msg"></div>
                 <div class="rcp-note">
                     While a race is open, a row on the race page and on the Change Car page shows
-                    the best of your cars for the track.<br><br>
-                    <b>How the best car is picked</b><br>
-                    1. If your car's model is in the track's top-5 lap records (any class), its record
-                    lap is used. So a model that is faster on this track wins, even if you never raced
-                    it there.<br>
-                    2. If the model has no record, your own best lap with that model is used, scaled by
-                    how far your laps are from the records.<br>
-                    3. Cars with no data rank last. Race limits (car class, car model, stock car) are
-                    respected.
+                    the fastest car model for the track. It is the model with the best lap in the
+                    track's top-5 lap records. The race class and car model limits are respected.
+                    The row also shows the fastest model in each class.
                 </div>`;
             body.querySelector("#rcp-key-change").addEventListener("click", () => {
                 KeyResolver.clear(); this.api.setKey(""); this.page?.rescan(); this.render();
