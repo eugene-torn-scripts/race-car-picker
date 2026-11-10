@@ -264,19 +264,19 @@ test("currentCarState compares models when names are not known", () => {
     const nsx = car("Edomondo NSX", TS3);
     const best = { car: nsx };
 
-    assert.equal(currentCarState(best, [nsx], { model: "Edomondo NSX", name: null }), "current");
-    assert.equal(currentCarState(best, [nsx], { model: "Veloria LFA", name: null }), "change");
+    assert.equal(currentCarState(best, [nsx], { model: "Edomondo NSX", texts: [] }), "current");
+    assert.equal(currentCarState(best, [nsx], { model: "Veloria LFA", texts: [] }), "change");
 });
 
 test("currentCarState asks to check the build when you own 2 cars of the same model", () => {
     const a = car("Edomondo NSX", TS3);
     const b = car("Edomondo NSX", DS3);
 
-    assert.equal(currentCarState({ car: a }, [a, b], { model: "Edomondo NSX", name: null }), "check");
+    assert.equal(currentCarState({ car: a }, [a, b], { model: "Edomondo NSX", texts: [] }), "check");
 });
 
 test("bestListIndexes finds nothing without a best car", () => {
-    const items = [{ model: "Edomondo NSX", name: null }];
+    const items = [{ model: "Edomondo NSX", texts: [] }];
 
     assert.deepEqual(bestListIndexes(null, items), []);
     assert.deepEqual(bestListIndexes({ car: null }, items), []);
@@ -286,9 +286,9 @@ test("bestListIndexes finds nothing without a best car", () => {
 test("bestListIndexes finds the list item by model when no car has a custom name", () => {
     const best = { car: car("Veloria LFA", TS3) };
     const items = [
-        { model: "Edomondo NSX", name: null },
-        { model: "Veloria LFA", name: null },
-        { model: "Mercia SLR", name: null },
+        { model: "Edomondo NSX", texts: [] },
+        { model: "Veloria LFA", texts: [] },
+        { model: "Mercia SLR", texts: [] },
     ];
 
     assert.deepEqual(bestListIndexes(best, items), [1]);
@@ -297,9 +297,9 @@ test("bestListIndexes finds the list item by model when no car has a custom name
 test("bestListIndexes finds every list item of the model when the build is not known", () => {
     const best = { car: car("Edomondo NSX", TS3) };
     const items = [
-        { model: "Edomondo NSX", name: null },
-        { model: "Mercia SLR", name: null },
-        { model: "Edomondo NSX", name: null },
+        { model: "Edomondo NSX", texts: [] },
+        { model: "Mercia SLR", texts: [] },
+        { model: "Edomondo NSX", texts: [] },
     ];
 
     assert.deepEqual(bestListIndexes(best, items), [0, 2]);
@@ -308,8 +308,8 @@ test("bestListIndexes finds every list item of the model when the build is not k
 test("bestListIndexes uses the custom name when the list shows it", () => {
     const best = { car: car("Edomondo NSX", TS3, { car_name: "NSX tarmac" }) };
     const items = [
-        { model: "Edomondo NSX", name: "NSX dirt" },
-        { model: "Edomondo NSX", name: "NSX tarmac" },
+        { model: "Edomondo NSX", texts: ["Edomondo NSX", "NSX dirt"] },
+        { model: "Edomondo NSX", texts: ["Edomondo NSX", "NSX tarmac"] },
     ];
 
     assert.deepEqual(bestListIndexes(best, items), [1]);
@@ -318,8 +318,8 @@ test("bestListIndexes uses the custom name when the list shows it", () => {
 test("bestListIndexes falls back to the model when the list hides the custom name", () => {
     const best = { car: car("Veloria LFA", TS3, { car_name: "LFA tarmac" }) };
     const items = [
-        { model: "Edomondo NSX", name: null },
-        { model: "Veloria LFA", name: null },
+        { model: "Edomondo NSX", texts: [] },
+        { model: "Veloria LFA", texts: [] },
     ];
 
     assert.deepEqual(bestListIndexes(best, items), [1]);
@@ -327,7 +327,7 @@ test("bestListIndexes falls back to the model when the list hides the custom nam
 
 test("bestListIndexes finds nothing when the list has no car of the model", () => {
     const best = { car: car("Veloria LFA", TS3) };
-    const items = [{ model: "Edomondo NSX", name: null }];
+    const items = [{ model: "Edomondo NSX", texts: [] }];
 
     assert.deepEqual(bestListIndexes(best, items), []);
 });
@@ -335,9 +335,36 @@ test("bestListIndexes finds nothing when the list has no car of the model", () =
 test("bestListIndexes finds every item when the list holds one model only", () => {
     const best = { car: car("Edomondo NSX", TS3) };
     const items = [
-        { model: "Edomondo NSX", name: null },
-        { model: "Edomondo NSX", name: null },
+        { model: "Edomondo NSX", texts: [] },
+        { model: "Edomondo NSX", texts: [] },
     ];
 
     assert.deepEqual(bestListIndexes(best, items), [0, 1]);
+});
+
+test("bestListIndexes lifts only the named car when 2 cars of one model show their names", () => {
+    const ts3 = car("Edomondo NSX", TS3, { car_name: "TS3" });
+    const items = [
+        { model: "Edomondo NSX", texts: ["Edomondo NSX", "DS3", "Class A"] },
+        { model: "Edomondo NSX", texts: ["Edomondo NSX", "TS3", "Class A"] },
+    ];
+
+    assert.deepEqual(bestListIndexes({ car: ts3 }, items), [1]);
+});
+
+test("bestListIndexes ignores a custom name that is only part of a text", () => {
+    const best = { car: car("Edomondo NSX", TS3, { car_name: "TS3" }) };
+    const items = [
+        { model: "Edomondo NSX", texts: ["TS3 old"] },
+        { model: "Mercia SLR", texts: [] },
+    ];
+
+    assert.deepEqual(bestListIndexes(best, items), [0]);
+});
+
+test("bestListIndexes treats a list item without texts as a list item without a name", () => {
+    const best = { car: car("Edomondo NSX", TS3, { car_name: "TS3" }) };
+    const items = [{ model: "Edomondo NSX" }, { model: "Mercia SLR", texts: ["TS3"] }];
+
+    assert.deepEqual(bestListIndexes(best, items), [1]);
 });

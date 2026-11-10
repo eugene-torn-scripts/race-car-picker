@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.5.0
+// @version      2.5.1
 // @description  Shows the best car you own for the current race track, and a car plan with the best car and build for every track.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.5.0";
+    const VERSION = "2.5.1";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -363,8 +363,9 @@
         const car = best?.car;
         if (!car) return [];
         const list = items || [];
-        const byName = car.car_name && list.some((i) => i.name === car.car_name);
-        const match = byName ? (i) => i.name === car.car_name : (i) => i.model === car.car_item_name;
+        const hasName = (i) => (i.texts || []).includes(car.car_name);
+        const byName = car.car_name && list.some(hasName);
+        const match = byName ? hasName : (i) => i.model === car.car_item_name;
         return list.reduce((acc, item, n) => (match(item) ? [...acc, n] : acc), []);
     }
 
@@ -612,10 +613,20 @@
             + (isIdeal ? "" : `<br><span class="rcp-dim">Ideal:</span> ${idealHtml}`);
     }
 
+    function ownText(el) {
+        return [...el.childNodes]
+            .filter((n) => n.nodeType === Node.TEXT_NODE)
+            .map((n) => n.textContent)
+            .join("")
+            .trim()
+            .replace(/^["\u201c\u201d']+|["\u201c\u201d']+$/g, "")
+            .trim();
+    }
+
     function readListItem(li) {
         const model = li.querySelector(".model .bold");
-        const name = [...li.querySelectorAll(".model p")].find((p) => p !== model);
-        return { model: model?.textContent.trim() || null, name: name?.textContent.trim() || null };
+        const texts = [...li.querySelectorAll("*")].map(ownText).filter(Boolean);
+        return { model: model?.textContent.trim() || null, texts };
     }
 
     class RacingPage {
