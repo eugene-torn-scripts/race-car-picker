@@ -22,6 +22,14 @@ How the best owned car is picked, in this order:
 3. Any of your cars with the correct surface build (tarmac or dirt). Planned models first, then by class.
 4. A planned model with the wrong surface build.
 
+## Change Car list
+
+On the **Change Car** page, the best car you own moves to the top of the list, with a green bar on its left. You do not have to search for it.
+
+If you own 2 cars of the same model and they have no custom names, both move to the top. The race row then tells you which build to use. Give your cars custom names to lift one car only.
+
+The list keeps its order if the script cannot find the car, or if every car in the list is a match.
+
 ## Car plan
 
 The footer icon opens the **car plan** directly (once the API key is set). The **i** button in the row opens it too. It starts with a **list of cars to buy, in priority order**. Cars you already own with the correct build are marked ✓ owned. A part change deletes the old part, so each build is a separate car. A toggle switches between 2 plans:

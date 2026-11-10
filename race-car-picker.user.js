@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.4.1
+// @version      2.5.0
 // @description  Shows the best car you own for the current race track, and a car plan with the best car and build for every track.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.4.1";
+    const VERSION = "2.5.0";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -359,6 +359,15 @@
         return { car: null, build: null, match: "none", ideal };
     }
 
+    function bestListIndexes(best, items) {
+        const car = best?.car;
+        if (!car) return [];
+        const list = items || [];
+        const byName = car.car_name && list.some((i) => i.name === car.car_name);
+        const match = byName ? (i) => i.name === car.car_name : (i) => i.model === car.car_item_name;
+        return list.reduce((acc, item, n) => (match(item) ? [...acc, n] : acc), []);
+    }
+
     function currentCarState(best, cars, current) {
         if (!best?.car || !current?.model) return "unknown";
         if (best.car.car_name && current.name) return best.car.car_name === current.name ? "current" : "change";
@@ -369,7 +378,7 @@
 
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
-            buildParts, planForTrack, carBuild, purchaseList, bestOwnedCar, currentCarState,
+            buildParts, planForTrack, carBuild, purchaseList, bestOwnedCar, currentCarState, bestListIndexes,
             PLANS, NOT_PURCHASABLE, BUILD_SURFACE, BUILD_RATIO, BUILD_TURBO,
         };
         return;
@@ -569,6 +578,8 @@
     border:1px solid #888;background:transparent;color:#ddd;font:italic 700 12px/16px Georgia,serif;cursor:pointer;vertical-align:middle}
 .rcp-row .rcp-info:hover{background:#444}
 .rcp-row.rcp-current .rcp-verdict{color:#8fe08f}
+.enlist-list.rcp-sorted{display:flex;flex-direction:column}
+.enlist-list.rcp-sorted>li.rcp-best{order:-1;box-shadow:inset 4px 0 0 0 #3ba55d}
 `;
 
     function injectPageCss() {
@@ -601,6 +612,12 @@
             + (isIdeal ? "" : `<br><span class="rcp-dim">Ideal:</span> ${idealHtml}`);
     }
 
+    function readListItem(li) {
+        const model = li.querySelector(".model .bold");
+        const name = [...li.querySelectorAll(".model p")].find((p) => p !== model);
+        return { model: model?.textContent.trim() || null, name: name?.textContent.trim() || null };
+    }
+
     class RacingPage {
         constructor(data) {
             this.data = data;
@@ -620,6 +637,8 @@
         }
 
         rescan() {
+            document.querySelectorAll(".rcp-lifted, .rcp-sorted, .rcp-best")
+                .forEach((el) => el.classList.remove("rcp-lifted", "rcp-sorted", "rcp-best"));
             document.querySelectorAll(".rcp-row").forEach((el) => el.remove());
             this.scan();
         }
@@ -630,9 +649,9 @@
             if (carBox && !carBox.querySelector(".rcp-row")) this._run(carBox, () => this.handleRacePage(carBox));
             const list = document.querySelector(".enlist-list");
             const wrap = list?.closest(".enlist-wrap");
-            if (wrap && !wrap.querySelector(".rcp-row") && list.querySelector('a[step-value="changeRacingCar"]')) {
-                this._run(wrap, () => this.handleChangePage(wrap, list));
-            }
+            if (!wrap || !list.querySelector('a[step-value="changeRacingCar"]')) return;
+            if (!wrap.querySelector(".rcp-row")) this._run(wrap, () => this.handleChangePage(wrap, list));
+            if (!list.classList.contains("rcp-lifted")) this._run(list, () => this.liftBestCar(wrap, list));
         }
 
         _run(host, fn) {
@@ -685,6 +704,20 @@
             const currentLi = [...list.querySelectorAll(":scope > li")].find((li) => li.querySelector(".icon-in-race"));
             const current = { model: currentLi?.querySelector(".model .bold")?.textContent.trim(), name: null };
             await this._showOwnedRow(wrap, block || list, block ? "afterend" : "beforebegin", trackTitle, current);
+        }
+
+        async liftBestCar(wrap, list) {
+            const block = this._currentRaceBlock(wrap);
+            const trackTitle = this._trackFromTitle(block?.querySelector(".enlisted-btn-wrap")?.textContent);
+            if (!planForTrack(PLANS.recommended, trackTitle)) return;
+            const cars = await this.data.cars();
+            if (list.classList.contains("rcp-lifted")) return;
+            list.classList.add("rcp-lifted");
+            const items = [...list.querySelectorAll(":scope > li")];
+            const picked = bestListIndexes(bestOwnedCar(cars, trackTitle), items.map(readListItem));
+            if (!picked.length || picked.length === items.length) return;
+            list.classList.add("rcp-sorted");
+            picked.forEach((n) => items[n].classList.add("rcp-best"));
         }
     }
 
