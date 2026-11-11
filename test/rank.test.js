@@ -368,3 +368,33 @@ test("bestListIndexes treats a list item without texts as a list item without a 
 
     assert.deepEqual(bestListIndexes(best, items), [1]);
 });
+
+test("bestListIndexes lifts only the right model when 2 different cars share a custom name", () => {
+    const lfa = car("Veloria LFA", [46, 85, 81], { car_name: "TL3" });
+    const items = [
+        { model: "Volt GT", texts: ["Volt GT", "TL3"] },
+        { model: "Veloria LFA", texts: ["Veloria LFA", "TL3"] },
+    ];
+
+    assert.deepEqual(bestListIndexes({ car: lfa }, items), [1]);
+});
+
+test("bestListIndexes finds the model in the list item texts when the model element is missing", () => {
+    const lfa = car("Veloria LFA", [46, 85, 81], { car_name: "TL3" });
+    const items = [
+        { model: null, texts: ["Volt GT", "TL3"] },
+        { model: null, texts: ["Veloria LFA", "TL3"] },
+    ];
+
+    assert.deepEqual(bestListIndexes({ car: lfa }, items), [1]);
+});
+
+test("bestListIndexes uses the custom name alone when no list item shows the model", () => {
+    const best = { car: car("Veloria LFA", [46, 85, 81], { car_name: "TL3" }) };
+    const items = [
+        { model: null, texts: ["DS3"] },
+        { model: null, texts: ["TL3"] },
+    ];
+
+    assert.deepEqual(bestListIndexes(best, items), [1]);
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Race Car Picker
 // @namespace    https://github.com/eugene-torn-scripts/race-car-picker
-// @version      2.5.1
+// @version      2.5.2
 // @description  Shows the best car you own for the current race track, and a car plan with the best car and build for every track.
 // @author       lannav
 // @match        https://www.torn.com/*
@@ -33,7 +33,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "2.5.1";
+    const VERSION = "2.5.2";
 
     const API_BASE = "https://api.torn.com/v2";
     const API_DELAY_MS = 700;
@@ -363,10 +363,11 @@
         const car = best?.car;
         if (!car) return [];
         const list = items || [];
-        const hasName = (i) => (i.texts || []).includes(car.car_name);
-        const byName = car.car_name && list.some(hasName);
-        const match = byName ? hasName : (i) => i.model === car.car_item_name;
-        return list.reduce((acc, item, n) => (match(item) ? [...acc, n] : acc), []);
+        const hasName = (i) => !!car.car_name && (i.texts || []).includes(car.car_name);
+        const hasModel = (i) => i.model === car.car_item_name || (i.texts || []).includes(car.car_item_name);
+        const tries = [(i) => hasName(i) && hasModel(i), hasName, hasModel];
+        const match = tries.find((t) => list.some(t));
+        return match ? list.reduce((acc, item, n) => (match(item) ? [...acc, n] : acc), []) : [];
     }
 
     function currentCarState(best, cars, current) {
@@ -625,7 +626,9 @@
 
     function readListItem(li) {
         const model = li.querySelector(".model .bold");
-        const texts = [...li.querySelectorAll("*")].map(ownText).filter(Boolean);
+        const elements = [...li.querySelectorAll("*")];
+        const labels = elements.flatMap((el) => [el.getAttribute("title"), el.getAttribute("alt")]).map((t) => t?.trim());
+        const texts = [...elements.map(ownText), ...labels].filter(Boolean);
         return { model: model?.textContent.trim() || null, texts };
     }
 
